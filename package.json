@@ -1,0 +1,31 @@
+{
+  "name": "railway-client-typescript",
+  "version": "1.0.0",
+  "description": "High speed railway client (TypeScript version)",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "npm run build:live",
+    "build:live": "nodemon --exec .\\node_modules\\.bin\\ts-node -- .\\index.ts"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/anypossiblew/railway-client-typescript.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/anypossiblew/railway-client-typescript/issues"
+  },
+  "homepage": "https://github.com/anypossiblew/railway-client-typescript#readme",
+  "devDependencies": {
+    "@types/node": "^9.4.0",
+    "nodemon": "^1.14.12",
+    "ts-node": "^4.1.0",
+    "typescript": "^2.7.1"
+  },
+  "dependencies": {
+    "@types/jquery": "^3.3.0"
+  }
+}
