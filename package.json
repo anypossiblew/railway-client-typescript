@@ -20,12 +20,22 @@
   },
   "homepage": "https://github.com/anypossiblew/railway-client-typescript#readme",
   "devDependencies": {
+    "@types/chalk": "^2.2.0",
+    "@types/es6-shim": "^0.31.35",
     "@types/node": "^9.4.0",
+    "@types/request": "^2.47.0",
+    "@types/tough-cookie": "^2.3.2",
+    "gulp": "^3.9.1",
+    "gulp-typescript": "^3.2.4",
+    "merge2": "^1.2.1",
     "nodemon": "^1.14.12",
     "ts-node": "^4.1.0",
     "typescript": "^2.7.1"
   },
   "dependencies": {
-    "@types/jquery": "^3.3.0"
+    "@reactivex/rxjs": "^5.5.6",
+    "chalk": "^2.3.0",
+    "request": "^2.83.0",
+    "tough-cookie": "^2.3.3"
   }
 }
