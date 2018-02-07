@@ -26,6 +26,7 @@
     "@types/request": "^2.47.0",
     "@types/tough-cookie": "^2.3.2",
     "gulp": "^3.9.1",
+    "gulp-sourcemaps": "^2.6.4",
     "gulp-typescript": "^3.2.4",
     "merge2": "^1.2.1",
     "nodemon": "^1.14.12",
