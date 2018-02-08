@@ -1,4 +1,5 @@
 import {FileCookieStore} from './FileCookieStore';
+import {Station} from './Station';
 import request = require('request');
 import querystring = require('querystring');
 import fs = require('fs');
@@ -6,6 +7,7 @@ import readline = require('readline');
 import process = require('process');
 import Rx = require('@reactivex/rxjs');
 import chalk = require('chalk');
+import columnify = require('columnify');
 
 export class Account {
   public userName : string;
@@ -14,6 +16,12 @@ export class Account {
   public BACK_TRAIN_DATE: string;
   public PLAN_TRAINS: Array<string>;
   public PLAN_PEPOLES: Array<string>;
+  public FROM_STATION: string;
+  public TO_STATION: string;
+  public FROM_STATION_NAME: string;
+  public TO_STATION_NAME: string;
+
+  private stations: Station = new Station();
 
   private SYSTEM_BUSSY = "System is bussy";
   private SYSTEM_MOVED = "Moved Temporarily";
@@ -53,12 +61,29 @@ export class Account {
     this.request = request.defaults({jar: this.cookiejar});
   }
 
-  public createOrder(trainDate: string, backTrainDate: string, planTrains: Array<string>, planPepoles: Array<string>): this {
+  public createOrder(trainDate: string, backTrainDate: string,
+                     fromStationName: string, toStationName: string,
+                     planTrains: Array<string>, planPepoles: Array<string>): this {
     this.TRAIN_DATE = trainDate;
     this.BACK_TRAIN_DATE = backTrainDate;
+    this.FROM_STATION_NAME = fromStationName;
+    this.TO_STATION_NAME = toStationName;
     this.PLAN_TRAINS = planTrains;
     this.PLAN_PEPOLES = planPepoles;
+    this.FROM_STATION = this.stations.getStationCode(fromStationName);
+    this.TO_STATION = this.stations.getStationCode(toStationName);
     return this;
+  }
+
+  public cancelOrderQueue() {
+    this.cancelQueueNoCompleteOrder()
+      .then(x=> {
+        if(x.status && x.data.existError == 'N') {
+          console.log(chalk`{green.bold 排队订单已取消}`);
+        }else {
+          console.error(x);
+        }
+      }, error=> console.error(error));
   }
 
   // Login init
@@ -101,7 +126,7 @@ export class Account {
         //console.log(trainsData);
         var trains = trainsData.result;
 
-        console.log("查询到火车数量 "+trains.length);
+        //console.log("查询到火车数量 "+trains.length);
         var planTrain, that = this;
         trains.forEach(function(train) {
           train = train.split("|");
@@ -116,10 +141,14 @@ export class Account {
 
         if(planTrain) {
           this.sjSmOReqCheckUser.next(planTrain[0]);
+        }else {
+          console.log(chalk`{yellow 没有可购买余票，重新查询}`);
+          setTimeout(()=> {
+            this.sjQueryLfTicket.next();
+          }, 1500);
         }
-
       }, err => {
-        console.error(err);
+        console.error(chalk`{yellow ${err}}`);
         setTimeout(()=> {
           this.sjQueryLfTicket.next();
         }, 1500);
@@ -311,6 +340,7 @@ export class Account {
         this.sjMyPage.next();
       }, (error: any)=> {
         console.log(chalk`{yellow.bold 获取Token失败，${error}}`);
+        // TODO
         setTimeout(x=> this.sjAppToken.next(newapptk), 1000);
       });
     });
@@ -326,6 +356,43 @@ export class Account {
 
   public submit(): void {
     this.sjLoginInit.next();
+  }
+
+  public leftTicketReport() {
+    var subjectLeftTicket = new Rx.Subject();
+
+    subjectLeftTicket.subscribe(()=> {
+      this.queryLeftTicket().then(trainsData => {
+        let trains: Array<Array<string>> = [];
+        var title = ['车次', '出发', '到达', '出发', '到达', '历时', '可买', '高级软卧', '', '软卧', '软座', '特等座', '无座', '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
+        trains.push(title);
+        trainsData.result.forEach((element: string)=> {
+          let train: Array<string> = element.split("|");
+          train.splice(0, 3);
+          train.splice(1, 2);
+          train.splice(7, 9);
+          train.splice(19, 4);
+          train[1] = this.stations.getStationName(train[1]);
+          train[2] = this.stations.getStationName(train[2]);
+          trains.push(train);
+          if(trains.length % 30 === 0) {
+            trains.push(title);
+          }
+        });
+
+        var columns = columnify(trains, {
+          columnSplitter: ' | '
+        })
+
+        console.log(columns);
+      }, error=> {
+        console.error(chalk`{yellow.bold ${error}}`);
+        subjectLeftTicket.next();
+      })
+      .catch(error=>console.error(error));
+    });
+
+    subjectLeftTicket.next();
   }
 
   public loginInit(): Promise<void> {
@@ -582,8 +649,8 @@ export class Account {
   private queryLeftTicket(): Promise<void> {
     var query = {
       "leftTicketDTO.train_date": this.TRAIN_DATE
-      ,"leftTicketDTO.from_station":"SHH"
-      ,"leftTicketDTO.to_station":"UUH"
+      ,"leftTicketDTO.from_station": this.FROM_STATION
+      ,"leftTicketDTO.to_station": this.TO_STATION
       ,"purpose_codes": "ADULT"
     }
 
@@ -662,8 +729,8 @@ export class Account {
       ,"back_train_date": this.BACK_TRAIN_DATE
       ,"tour_flag": "dc"
       ,"purpose_codes": "ADULT"
-      ,"query_from_station_name": "上海"
-      ,"query_to_station_name": "徐州东"
+      ,"query_from_station_name": this.FROM_STATION_NAME
+      ,"query_to_station_name": this.TO_STATION_NAME
       ,"undefined":""
     };
 

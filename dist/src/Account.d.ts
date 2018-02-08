@@ -5,6 +5,11 @@ export declare class Account {
     BACK_TRAIN_DATE: string;
     PLAN_TRAINS: Array<string>;
     PLAN_PEPOLES: Array<string>;
+    FROM_STATION: string;
+    TO_STATION: string;
+    FROM_STATION_NAME: string;
+    TO_STATION_NAME: string;
+    private stations;
     private SYSTEM_BUSSY;
     private SYSTEM_MOVED;
     private request;
@@ -16,7 +21,8 @@ export declare class Account {
      */
     private isSystemBussy(body);
     setRequest(): void;
-    createOrder(trainDate: string, backTrainDate: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    createOrder(trainDate: string, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    cancelOrderQueue(): void;
     private sjLoginInit;
     private sjCaptcha;
     private sjLogin;
@@ -37,6 +43,7 @@ export declare class Account {
     private buildOrderFlow();
     private buildLoginFlow();
     submit(): void;
+    leftTicketReport(): void;
     loginInit(): Promise<void>;
     private getCaptcha();
     private checkCaptcha();
