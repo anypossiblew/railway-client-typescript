@@ -1,5 +1,17 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// import readline = require("readline");
 var Account_1 = require("./src/Account");
-new Account_1.Account("anypossiblew", "String0int").login().then(function (x) { return console.log(x); }, function (error) { return console.error(error); });
+var account = new Account_1.Account("XXXXXXXXXX", "***********") //账号信息
+    .createOrder("2018-02-21", //发车日期
+"2018-02-25", //返程日期
+"徐州", "上海", //出发到达站
+["G121", "G1915", "G459", "G127", "G1919", "G1955", "G129"], //车次
+["张三"]); //乘车人姓名 ["张三", "李四"]
+if (process.argv.length === 2) {
+    account.submit();
+}
+else if (process.argv.length === 3) {
+    account[process.argv[2]]();
+}
+
+//# sourceMappingURL=data:application/json;charset=utf8;base64,eyJ2ZXJzaW9uIjozLCJzb3VyY2VzIjpbIi4uL2luZGV4LnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7O0FBQ0EseUNBQXNDO0FBRXRDLElBQUksT0FBTyxHQUFHLElBQUksaUJBQU8sQ0FBQyxZQUFZLEVBQUUsYUFBYSxDQUFDLENBQUMsTUFBTTtLQUMxRCxXQUFXLENBQUMsWUFBWSxFQUFFLE1BQU07QUFDcEIsWUFBWSxFQUFFLE1BQU07QUFDcEIsSUFBSSxFQUFFLElBQUksRUFBRSxPQUFPO0FBQ25CLENBQUMsTUFBTSxFQUFFLE9BQU8sRUFBRSxNQUFNLEVBQUUsTUFBTSxFQUFFLE9BQU8sRUFBRSxPQUFPLEVBQUUsTUFBTSxDQUFDLEVBQUUsSUFBSTtBQUNqRSxDQUFDLElBQUksQ0FBQyxDQUFDLENBQUMsQ0FBQyxvQkFBb0I7QUFFNUMsRUFBRSxDQUFBLENBQUMsT0FBTyxDQUFDLElBQUksQ0FBQyxNQUFNLEtBQUssQ0FBQyxDQUFDLENBQUMsQ0FBQztJQUM3QixPQUFPLENBQUMsTUFBTSxFQUFFLENBQUM7QUFDbkIsQ0FBQztBQUFBLElBQUksQ0FBQyxFQUFFLENBQUEsQ0FBQyxPQUFPLENBQUMsSUFBSSxDQUFDLE1BQU0sS0FBSyxDQUFDLENBQUMsQ0FBQyxDQUFDO0lBQ25DLE9BQU8sQ0FBQyxPQUFPLENBQUMsSUFBSSxDQUFDLENBQUMsQ0FBQyxDQUFDLEVBQUUsQ0FBQztBQUM3QixDQUFDIiwiZmlsZSI6ImluZGV4LmpzIiwic291cmNlc0NvbnRlbnQiOlsiXHJcbmltcG9ydCB7QWNjb3VudH0gZnJvbSAnLi9zcmMvQWNjb3VudCc7XHJcblxyXG52YXIgYWNjb3VudCA9IG5ldyBBY2NvdW50KFwiWFhYWFhYWFhYWFwiLCBcIioqKioqKioqKioqXCIpIC8v6LSm5Y+35L+h5oGvXHJcbiAgLmNyZWF0ZU9yZGVyKFwiMjAxOC0wMi0yMVwiLCAvL+WPkei9puaXpeacn1xyXG4gICAgICAgICAgICAgICBcIjIwMTgtMDItMjVcIiwgLy/ov5TnqIvml6XmnJ9cclxuICAgICAgICAgICAgICAgXCLlvpDlt55cIiwgXCLkuIrmtbdcIiwgLy/lh7rlj5HliLDovr7nq5lcclxuICAgICAgICAgICAgICAgW1wiRzEyMVwiICxcIkcxOTE1XCIgLFwiRzQ1OVwiICxcIkcxMjdcIiAsXCJHMTkxOVwiICxcIkcxOTU1XCIgLFwiRzEyOVwiXSwgLy/ovabmrKFcclxuICAgICAgICAgICAgICAgW1wi5byg5LiJXCJdKTsgLy/kuZjovabkurrlp5PlkI0gW1wi5byg5LiJXCIsIFwi5p2O5ZubXCJdXHJcblxyXG5pZihwcm9jZXNzLmFyZ3YubGVuZ3RoID09PSAyKSB7XHJcbiAgYWNjb3VudC5zdWJtaXQoKTtcclxufWVsc2UgaWYocHJvY2Vzcy5hcmd2Lmxlbmd0aCA9PT0gMykge1xyXG4gIGFjY291bnRbcHJvY2Vzcy5hcmd2WzJdXSgpO1xyXG59XHJcbiJdfQ==
