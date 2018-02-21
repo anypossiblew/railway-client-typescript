@@ -1,3 +1,5 @@
+ // https://www.lanindex.com/12306%E8%B4%AD%E7%A5%A8%E6%B5%81%E7%A8%8B%E5%85%A8%E8%A7%A3%E6%9E%90/
+
 import {FileCookieStore} from './FileCookieStore';
 import {Station} from './Station';
 import request = require('request');
@@ -22,6 +24,7 @@ export class Account {
   public TO_STATION_NAME: string;
 
   private stations: Station = new Station();
+  private passengers: object;
 
   private SYSTEM_BUSSY = "System is bussy";
   private SYSTEM_MOVED = "Moved Temporarily";
@@ -35,6 +38,10 @@ export class Account {
     ,"Origin": "https://kyfw.12306.cn"
     ,"Referer": "https://kyfw.12306.cn/otn/passport?redirect=/otn/"
   };
+
+  private query = false;
+
+  private orders: Array<object> = [];
 
   constructor(name: string, userPassword: string) {
     this.userName = name;
@@ -53,7 +60,8 @@ export class Account {
   }
 
   public setRequest() {
-    var fileStore = new FileCookieStore("./cookies/"+this.userName+".json", {encrypt: false});
+    let cookieFileName: string = "./cookies/"+this.userName+".json";
+    var fileStore = new FileCookieStore(cookieFileName, {encrypt: false});
     fileStore.option = {encrypt: false};
 
     this.cookiejar = request.jar(fileStore);
@@ -61,18 +69,38 @@ export class Account {
     this.request = request.defaults({jar: this.cookiejar});
   }
 
-  public createOrder(trainDate: string, backTrainDate: string,
+  public createOrder(trainDates: string, backTrainDate: string,
                      fromStationName: string, toStationName: string,
                      planTrains: Array<string>, planPepoles: Array<string>): this {
-    this.TRAIN_DATE = trainDate;
-    this.BACK_TRAIN_DATE = backTrainDate;
-    this.FROM_STATION_NAME = fromStationName;
-    this.TO_STATION_NAME = toStationName;
-    this.PLAN_TRAINS = planTrains;
-    this.PLAN_PEPOLES = planPepoles;
-    this.FROM_STATION = this.stations.getStationCode(fromStationName);
-    this.TO_STATION = this.stations.getStationCode(toStationName);
+
+    // if(typeof trainDate == "object" && trainDate.constructor.name == "Array") {
+    //
+    // }
+    trainDates.forEach(trainDate=> {
+      this.orders.push({
+        TRAIN_DATE: trainDate
+        ,BACK_TRAIN_DATE: backTrainDate
+        ,FROM_STATION_NAME: fromStationName;
+        ,TO_STATION_NAME: toStationName;
+        ,PLAN_TRAINS: planTrains;
+        ,PLAN_PEPOLES: planPepoles;
+        ,FROM_STATION: this.stations.getStationCode(fromStationName);
+        ,TO_STATION: this.stations.getStationCode(toStationName);
+      })
+    });
+
     return this;
+  }
+
+  private setOrder(order) {
+    this.TRAIN_DATE = order.TRAIN_DATE;
+    this.BACK_TRAIN_DATE = order.BACK_TRAIN_DATE;
+    this.FROM_STATION_NAME = order.FROM_STATION_NAME;
+    this.TO_STATION_NAME = order.TO_STATION_NAME;
+    this.PLAN_TRAINS = order.PLAN_TRAINS;
+    this.PLAN_PEPOLES = order.PLAN_PEPOLES;
+    this.FROM_STATION = order.FROM_STATION;
+    this.TO_STATION = order.TO_STATION;
   }
 
   public cancelOrderQueue() {
@@ -115,14 +143,23 @@ export class Account {
     // 初始化查询火车余票页面
     this.sjLfTicketInit.subscribe(()=> {
       this.leftTicketInit()
-        .then(()=>this.sjQueryLfTicket.next(), (error: any)=> {
+        .then(()=>this.sjQueryLfTicket.next(0), (error: any)=> {
           console.error(error);
         });
     });
 
     // 查询火车余票
-    this.sjQueryLfTicket.subscribe(()=> {
-      this.queryLeftTicket().then(trainsData => {
+    this.sjQueryLfTicket.subscribe((i)=> {
+
+      let order = this.orders[i];
+      this.setOrder(order);
+
+      if(this.query) {
+        process.stdout.clearLine();
+        process.stdout.cursorTo(0);
+      }
+
+      this.queryLeftTicket(order.TRAIN_DATE).then(trainsData => {
         //console.log(trainsData);
         var trains = trainsData.result;
 
@@ -132,34 +169,51 @@ export class Account {
           train = train.split("|");
 
           if(train[30] == "有" || (train[30] > 0 && train[30] != "无" && train[30] != "0")) {
-            console.log(train[3]);
-            if(that.PLAN_TRAINS.includes(train[3])) {
+            console.log(order.TRAIN_DATE+"/"+train[3]+"/"+train[30]);
+            if(order.PLAN_TRAINS.includes(train[3])) {
               planTrain = train;
             }
           }
         });
 
         if(planTrain) {
-          this.sjSmOReqCheckUser.next(planTrain[0]);
+          return planTrain;
         }else {
-          console.log(chalk`{yellow 没有可购买余票，重新查询}`);
-          setTimeout(()=> {
-            this.sjQueryLfTicket.next();
-          }, 1500);
+          // console.log(chalk`{yellow 没有可购买余票 ${this.TRAIN_DATE[i]}}`);
+          process.stdout.write(chalk`{yellow 没有可购买余票 ${order.TRAIN_DATE}}`);
+          return Promise.reject();
         }
       }, err => {
-        console.error(chalk`{yellow ${err}}`);
-        setTimeout(()=> {
-          this.sjQueryLfTicket.next();
-        }, 1500);
-      });
+        // console.error(chalk`{yellow ${err}}`);
+        process.stdout.write(chalk`{yellow ${err}}`);
+        return Promise.reject();
+      })
+      .then((planTrain)=> {
+          this.query = false;
+          this.sjSmOReqCheckUser.next(planTrain[0]);
+        },()=> {
+          i = (i+1)%this.orders.length;
+          setTimeout(()=> {
+            this.sjQueryLfTicket.next(i);
+          }, 1500);
+          this.query = true;
+        });
     });
 
     // Step 10 验证登录，Post
     this.sjSmOReqCheckUser.subscribe((train: string)=> {
       console.log("submit order request check user");
       this.checkUser().then(()=>this.sjSmOrderReq.next(train), error => {
-        console.error("Check user error " + error);
+        console.error("Check user error ");
+        console.error(error);
+        /* TODO add relogin logic
+        { validateMessagesShowId: '_validatorMessage',
+          status: true,
+          httpstatus: 200,
+          data: { flag: false },
+          messages: [],
+          validateMessages: {} }
+        */
         this.sjSmOReqCheckUser.next(train);
       });
     });
@@ -168,12 +222,12 @@ export class Account {
     this.sjSmOrderReq.subscribe((train: string)=> {
       console.log("submit order request");
       this.submitOrderRequest(train).then((x)=> {
-        console.log("Submit Order Request success!")
-        this.sjCPasInitDc.next();
-      }, error=> {
-        console.error("SubmitOrderRequest error " + error);
-        this.sjSmOrderReq.next(train);
-      })
+          console.log("Submit Order Request success!")
+          this.sjCPasInitDc.next();
+        }, error=> {
+          console.error("SubmitOrderRequest error " + error);
+          this.sjSmOrderReq.next(train);
+        });
     });
 
     // Step 12 模拟跳转页面InitDc，Post
@@ -181,7 +235,12 @@ export class Account {
       this.confirmPassengerInitDc().then((orderRequest: object)=> {
         console.log("confirmPassenger Init Dc success! "+orderRequest.token);
         // console.log(orderRequest.ticketInfo);
-        this.sjGetPassengers.next(orderRequest);
+        if(this.passengers) {
+          orderRequest.passengers = this.passengers;
+          this.sjCheckOrderInfo.next(orderRequest);
+        }else {
+          this.sjGetPassengers.next(orderRequest);
+        }
       }, error=> {
         if(error == this.SYSTEM_BUSSY) {
           console.log(error);
@@ -198,6 +257,7 @@ export class Account {
     // Step 13 常用联系人确定，Post
     this.sjGetPassengers.subscribe((orderRequest: object)=> {
       this.getPassengers(orderRequest.token).then(passengers=> {
+        this.passengers = passengers;
         orderRequest.passengers = passengers;
         this.sjCheckOrderInfo.next(orderRequest);
       }, error=> {
@@ -243,12 +303,22 @@ export class Account {
 
     this.sjConfirmSingle4Q.subscribe((orderRequest: object)=> {
       this.confirmSingleForQueue(orderRequest.token, orderRequest.passengers.data.normal_passengers, orderRequest.ticketInfo)
-        .then(x=>{
+        .then(x=> {
           if(x.status && x.data.submitStatus) {
             // Step 18 查询排队等待时间！
             this.sjQueryOrderWaitT.next(orderRequest);
           }else {
-            console.log(x);
+            /**
+            { validateMessagesShowId: '_validatorMessage',
+              status: true,
+              httpstatus: 200,
+              data: { errMsg: '余票不足！', submitStatus: false },
+              messages: [],
+              validateMessages: {} }
+            */
+            console.log(chalk`{yellow.bold ${x.data.errMsg}}`);
+            // 重新开始查询
+            this.sjQueryLfTicket.next(0);
           }
         }, error=> {
           console.error(error);
@@ -324,8 +394,24 @@ export class Account {
 
     this.sjLogin.subscribe(()=> {
       this.userAuthenticate()
-        .then(()=>this.sjNewAppToken.next(), (error: any)=>this.sjLogin.next()) // TODO this.sjCaptcha.next();
-        .catch((error: any)=>console.error(error));
+        .then(()=>this.sjNewAppToken.next(), (error: any)=>{
+          /*
+          {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
+          {"result_message":"验证码校验失败","result_code":"5"}
+          */
+          if(typeof error.result_code == "undefined") {
+            this.sjLogin.next();
+          }else {
+            if(error.result_code === 1) {
+              throw error.result_message;
+            }else if(error.result_code === 5) {
+              this.sjCaptcha.next();
+            }else {
+              this.sjCaptcha.next();
+            }
+          }
+        })
+        ;
     });
 
     this.sjNewAppToken.subscribe(()=> {
@@ -339,9 +425,14 @@ export class Account {
       this.getAppToken(newapptk).then((x: string) => {
         this.sjMyPage.next();
       }, (error: any)=> {
-        console.log(chalk`{yellow.bold 获取Token失败，${error}}`);
-        // TODO
-        setTimeout(x=> this.sjAppToken.next(newapptk), 1000);
+        console.log(chalk`{yellow.bold 获取Token失败}`);
+        console.log(error);
+        if(error.result_code && error.result_code === 2) {
+          this.sjCaptcha.next();
+        }else {
+          // TODO
+          setTimeout(x=> this.sjAppToken.next(newapptk), 1000);
+        }
       });
     });
 
@@ -358,11 +449,55 @@ export class Account {
     this.sjLoginInit.next();
   }
 
-  public leftTicketReport() {
+  public queryLeftTickets(trainDate, fromStationName, toStationName, bypassStationName) {
+    this.BACK_TRAIN_DATE = trainDate;
+    this.FROM_STATION_NAME = fromStationName;
+    this.TO_STATION_NAME = toStationName;
+    this.FROM_STATION = this.stations.getStationCode(fromStationName);
+    this.TO_STATION = this.stations.getStationCode(toStationName);
+
     var subjectLeftTicket = new Rx.Subject();
 
     subjectLeftTicket.subscribe(()=> {
-      this.queryLeftTicket().then(trainsData => {
+      this.queryLeftTicket(trainDate).then(trainsData => {
+        let trains: Array<Array<string>> = [];
+        var title = ['车次', '出发', '到达', '出发', '到达', '历时', '可买', '高级软卧', '', '软卧', '软座', '特等座', '无座', '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
+        trains.push(title);
+        trainsData.result.forEach((element: string)=> {
+          let train: Array<string> = element.split("|");
+          // train.splice(0, 3);
+          // train.splice(1, 2);
+          // train.splice(7, 9);
+          // train.splice(19, 4);
+          // train[1] = this.stations.getStationName(train[1]);
+          // train[2] = this.stations.getStationName(train[2]);
+          trains.push(train);
+          if(trains.length % 30 === 0) {
+            trains.push(title);
+          }
+        });
+
+        var columns = columnify(trains, {
+          columnSplitter: ' | '
+        })
+
+        console.log(columns);
+      }, error=> {
+        console.error(chalk`{yellow.bold ${error}}`);
+        subjectLeftTicket.next();
+      })
+      .catch(error=>console.error(error));
+    });
+
+    subjectLeftTicket.next();
+  }
+
+  public leftTicketReport() {
+    this.setOrder(this.orders[0]);
+    var subjectLeftTicket = new Rx.Subject();
+
+    subjectLeftTicket.subscribe(()=> {
+      this.queryLeftTicket(this.TRAIN_DATE).then(trainsData => {
         let trains: Array<Array<string>> = [];
         var title = ['车次', '出发', '到达', '出发', '到达', '历时', '可买', '高级软卧', '', '软卧', '软座', '特等座', '无座', '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
         trains.push(title);
@@ -395,6 +530,27 @@ export class Account {
     subjectLeftTicket.next();
   }
 
+  public myOrderNoCompleteReport() {
+    var subjectOrderNoComplete = new Rx.Subject();
+
+    subjectOrderNoComplete.subscribe(()=> {
+      this.initNoComplete().then(()=> {
+        this.queryMyOrderNoComplete().then(x=> {
+            var columns = columnify(x, {
+              columnSplitter: ' | '
+            });
+
+            console.log(columns);
+          }, error=> {
+            console.error(error);
+            setTimeout(()=> subjectOrderNoComplete.next(), 1000)
+          });
+      }, error=> console.error(error));
+    });
+
+    subjectOrderNoComplete.next();
+  }
+
   public loginInit(): Promise<void> {
     var url = "https://kyfw.12306.cn/otn/login/init";
     var options = {
@@ -405,6 +561,8 @@ export class Account {
 
     return new Promise<void>((resolve: object, reject: object)=> {
       this.request(options, (error, response, body) => {
+        if(error) return reject(error.toString());
+
         if(response.statusCode === 200) {
           return resolve();
         }
@@ -646,9 +804,9 @@ export class Account {
     });
   }
 
-  private queryLeftTicket(): Promise<void> {
+  private queryLeftTicket(trainDate): Promise<void> {
     var query = {
-      "leftTicketDTO.train_date": this.TRAIN_DATE
+      "leftTicketDTO.train_date": trainDate
       ,"leftTicketDTO.from_station": this.FROM_STATION
       ,"leftTicketDTO.to_station": this.TO_STATION
       ,"purpose_codes": "ADULT"
@@ -660,7 +818,9 @@ export class Account {
 
     return new Promise((resolve, reject)=> {
       this.request(url, (error, response, body)=> {
-        if(error) throw error;
+        if(error) {
+          return reject(error.toString());
+        }
         // console.log(response.statusCode);
         // console.log(body);
         if(response.statusCode === 200) {
@@ -753,6 +913,10 @@ export class Account {
           body = JSON.parse(body);
           if(body.status) {
             return resolve(body);
+          }
+          // console.error(body);
+          if(body.messages[0].indexOf('您还有未处理的订单')>-1) {
+            throw chalk`{red.bold 您还有未处理的订单}`;
           }
           return reject(body.messages[0]);
         }
@@ -1131,4 +1295,59 @@ export class Account {
       });
     });
   }
+
+  private initNoComplete() {
+    let url = "https://kyfw.12306.cn/otn/queryOrder/initNoComplete";
+    let options = {
+      url: url
+      ,method: "POST"
+      ,headers: Object.assign(Object.assign({}, this.headers), {
+        "Referer": "https://kyfw.12306.cn/otn/queryOrder/initNoComplete"
+      })
+      ,form: {
+        "_json_att": ""
+      }
+    };
+
+    return new Promise((resolve, reject)=> {
+      this.request(options, (error, response, body)=> {
+        if(error) throw error;
+        if(response.statusCode === 200) {
+          return resolve(body)
+        }else {
+          reject(response.statusCode);
+        }
+      });
+    });
+  }
+
+  private queryMyOrderNoComplete() {
+    let url = "https://kyfw.12306.cn/otn/queryOrder/queryMyOrderNoComplete";
+    let options = {
+      url: url
+      ,method: "POST"
+      ,headers: Object.assign(Object.assign({}, this.headers), {
+        "Referer": "https://kyfw.12306.cn/otn/queryOrder/initNoComplete"
+      })
+      ,form: {
+        "_json_att": ""
+      }
+      ,json: true
+    };
+
+    return new Promise((resolve, reject)=> {
+      this.request(options, (error, response, body)=> {
+        if(error) throw error;
+        if(response.statusCode === 200) {
+          if(body.status) {
+            return resolve(body.data.orderDBList)
+          }
+          return reject(body.messages);
+        }else {
+          reject(response.statusCode);
+        }
+      });
+    });
+  }
+
 }

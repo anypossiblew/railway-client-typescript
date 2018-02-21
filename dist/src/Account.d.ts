@@ -10,18 +10,22 @@ export declare class Account {
     FROM_STATION_NAME: string;
     TO_STATION_NAME: string;
     private stations;
+    private passengers;
     private SYSTEM_BUSSY;
     private SYSTEM_MOVED;
     private request;
     private cookiejar;
     headers: object;
+    private query;
+    private orders;
     constructor(name: string, userPassword: string);
     /**
      * 检查网络异常
      */
     private isSystemBussy(body);
     setRequest(): void;
-    createOrder(trainDate: string, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    createOrder(trainDates: string, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    private setOrder(order);
     cancelOrderQueue(): void;
     private sjLoginInit;
     private sjCaptcha;
@@ -43,7 +47,9 @@ export declare class Account {
     private buildOrderFlow();
     private buildLoginFlow();
     submit(): void;
+    queryLeftTickets(trainDate: any, fromStationName: any, toStationName: any, bypassStationName: any): void;
     leftTicketReport(): void;
+    myOrderNoCompleteReport(): void;
     loginInit(): Promise<void>;
     private getCaptcha();
     private checkCaptcha();
@@ -56,7 +62,7 @@ export declare class Account {
      */
     private getAppToken(newapptk);
     private leftTicketInit();
-    private queryLeftTicket();
+    private queryLeftTicket(trainDate);
     private checkUser();
     private submitOrderRequest(secretStr);
     private confirmPassengerInitDc();
@@ -70,4 +76,6 @@ export declare class Account {
     private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm);
     private queryOrderWaitTime(token);
     private cancelQueueNoCompleteOrder();
+    private initNoComplete();
+    private queryMyOrderNoComplete();
 }
