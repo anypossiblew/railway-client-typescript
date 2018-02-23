@@ -16,6 +16,7 @@ export declare class Account {
     private request;
     private cookiejar;
     headers: object;
+    private TICKET_TITLE;
     private query;
     private orders;
     constructor(name: string, userPassword: string);
@@ -24,15 +25,23 @@ export declare class Account {
      */
     private isSystemBussy(body);
     setRequest(): void;
-    createOrder(trainDates: Array<string>, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    createOrder(trainDates: Array<string>, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this;
     private setOrder(order);
     cancelOrderQueue(): void;
+    submit(): void;
     private sjLoginInit;
+    private obLoginInit;
     private sjCaptcha;
+    private obCaptcha;
     private sjLogin;
+    private obLogin;
     private sjNewAppToken;
+    private obNewAppToken;
     private sjAppToken;
+    private obAppToken;
     private sjMyPage;
+    private build();
+    private buildLoginFlow();
     private sjLfTicketInit;
     private sjQueryLfTicket;
     private sjSmOReqCheckUser;
@@ -45,8 +54,6 @@ export declare class Account {
     private sjConfirmSingle4Q;
     private sjQueryOrderWaitT;
     private buildOrderFlow();
-    private buildLoginFlow();
-    submit(): void;
     /**
      * 查询列车余票信息
      *

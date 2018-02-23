@@ -39,17 +39,21 @@ export class Account {
     ,"Referer": "https://kyfw.12306.cn/otn/passport?redirect=/otn/"
   };
 
+  private TICKET_TITLE = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
+               '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
+               '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
+
   private query = false;
 
   private orders: Array<object> = [];
+
 
   constructor(name: string, userPassword: string) {
     this.userName = name;
     this.userPassword = userPassword;
 
     this.setRequest();
-    this.buildLoginFlow();
-    this.buildOrderFlow();
+    this.build();
   }
 
   /**
@@ -71,11 +75,7 @@ export class Account {
 
   public createOrder(trainDates: Array<string>, backTrainDate: string,
                      fromStationName: string, toStationName: string,
-                     planTrains: Array<string>, planPepoles: Array<string>): this {
-
-    // if(typeof trainDate == "object" && trainDate.constructor.name == "Array") {
-    //
-    // }
+                     planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this {
     trainDates.forEach(trainDate=> {
       this.orders.push({
         TRAIN_DATE: trainDate
@@ -86,6 +86,7 @@ export class Account {
         ,PLAN_PEPOLES: planPepoles;
         ,FROM_STATION: this.stations.getStationCode(fromStationName);
         ,TO_STATION: this.stations.getStationCode(toStationName);
+        ,SEAT_CLASSES: seatClasses
       })
     });
 
@@ -114,18 +115,147 @@ export class Account {
       }, error=> console.error(error));
   }
 
+  public submit(): void {
+    this.buildLoginFlow();
+    this.buildOrderFlow();
+    this.sjLoginInit.next();
+  }
+
   // Login init
-  private sjLoginInit   = new Rx.Subject();
+  private sjLoginInit   = new Rx.ReplaySubject<Number>();
+  private obLoginInit: Rx.Observable<any>;
+
   // Check Captcha
-  private sjCaptcha     = new Rx.Subject();
+  private sjCaptcha     = new Rx.ReplaySubject();
+  private obCaptcha: Rx.Observable<any>;
+
   // Login
-  private sjLogin       = new Rx.Subject();
+  private sjLogin       = new Rx.ReplaySubject();
+  private obLogin: Rx.Observable<any>;
+
   // Get new app token
   private sjNewAppToken = new Rx.Subject();
+  private obNewAppToken: Rx.Observable<any>;
+
   // Get app token
   private sjAppToken    = new Rx.Subject<string>();
+  private obAppToken: Rx.Observable<any>;
+
   // Get my main page
   private sjMyPage      = new Rx.Subject();
+
+  private build() {
+    // 登录流程
+    this.obLoginInit =
+      this.sjLoginInit.mergeMap(order=>this.loginInit())
+                      .retry(Number.MAX_SAFE_INTEGER)
+                      .map(order => this.checkAuthentication(this.cookiejar._jar.toJSON().cookies));
+
+    this.obCaptcha =
+    this.sjCaptcha.mergeMap(()=>this.getCaptcha())
+                  .mergeMap(()=>this.checkCaptcha().then(()=>{
+                    // 校验码成功后进行授权认证
+                    console.log(chalk`{green.bold 验证码校验成功}`);
+                  },err=> {
+                    // 校验失败，重新校验
+                    console.log(chalk`{yellow.bold 校验失败，重新校验}`);
+                    return Promise.reject(err);
+                  }))
+                  .retry(Number.MAX_SAFE_INTEGER);
+
+    this.obLogin =
+    this.sjLogin.mergeMap(()=>this.userAuthenticate()
+                                  .then(()=> {
+                                    console.log(chalk`{green.bold 登录成功}`);
+                                  },err=> {
+                                    /*
+                                    {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
+                                    {"result_message":"验证码校验失败","result_code":"5"}
+                                    */
+                                    if(typeof err.result_code == "undefined") {
+                                      return Promise.reject(err);
+                                    }else {
+                                      console.log(chalk`{yellow.bold ${err.result_message}}`);
+                                      return err;
+                                      // if(error.result_code === 1) {
+                                      //   throw error.result_message;
+                                      // }else if(error.result_code === 5) {
+                                      //   this.sjCaptcha.next();
+                                      // }else {
+                                      //   this.sjCaptcha.next();
+                                      // }
+                                    }
+                                  }))
+                .retry(Number.MAX_SAFE_INTEGER)
+                ;
+
+    this.obNewAppToken = this.sjNewAppToken
+                             .mergeMap(()=>this.getNewAppToken());
+    this.obAppToken = this.sjAppToken
+                          .mergeMap((newapptk: string)=>this.getAppToken(newapptk)
+                            .then((x: string) => , (err: any)=> {
+                              console.log(chalk`{yellow.bold 获取Token失败}`);
+                              console.log(err);
+                              if(err.result_code && err.result_code === 2) {
+                                return err;
+                              }else {
+                                return Promise.reject(err);
+                              }
+                            }))
+                          .retry(Number.MAX_SAFE_INTEGER);
+
+  }
+
+  private buildLoginFlow(): void {
+
+    // 登录初始化
+    this.obLoginInit
+      .subscribe(tokens=> {
+        if(tokens.tk) {
+          return this.sjAppToken.next(tokens.tk);
+        }else if(tokens.uamtk) {
+          return this.sjNewAppToken.next();
+        }
+        this.sjCaptcha.next(1);
+      });
+
+    // 校验码
+    this.obCaptcha
+      .subscribe(()=>this.sjLogin.next(1)
+      ,err=>console.error(err));
+
+    // 登录
+    this.obLogin.subscribe((err)=> {
+      // 登录失败将重新从校验码开始
+      if(err) {
+        this.sjCaptcha.next(1);
+      }else {
+        this.sjNewAppToken.next();
+      }
+    });
+
+    this.obNewAppToken.subscribe((newapptk: string)=> {
+      this.sjAppToken.next(newapptk)
+    },err=> {
+      this.sjCaptcha.next(1);
+    });
+
+    this.obAppToken.subscribe((err: any) => {
+      if(err) {
+        this.sjCaptcha.next(1);
+      }else {
+        this.sjMyPage.next();
+      }
+
+    }, (error: any)=> {
+      console.log(error);
+    });
+
+    this.sjMyPage.mergeMap(()=>this.getMy12306()).subscribe(()=> {
+      console.log(chalk`{green.bold 登录成功}`);
+      this.sjLfTicketInit.next();
+    });
+  }
 
   private sjLfTicketInit      = new Rx.Subject();
   private sjQueryLfTicket     = new Rx.Subject();
@@ -140,6 +270,7 @@ export class Account {
   private sjQueryOrderWaitT   = new Rx.Subject();
 
   private buildOrderFlow() {
+
     // 初始化查询火车余票页面
     this.sjLfTicketInit.subscribe(()=> {
       this.leftTicketInit()
@@ -159,25 +290,25 @@ export class Account {
         process.stdout.cursorTo(0);
       }
 
-      this.queryLeftTicket(order.TRAIN_DATE).then(trainsData => {
-        //console.log(trainsData);
-        var trains = trainsData.result;
-
-        //console.log("查询到火车数量 "+trains.length);
-        var planTrain, that = this;
-        trains.forEach(function(train) {
-          train = train.split("|");
-
-          if(train[30] == "有" || (train[30] > 0 && train[30] != "无" && train[30] != "0")) {
-            console.log(order.TRAIN_DATE+"/"+train[3]+"/"+train[30]);
-            if(order.PLAN_TRAINS.includes(train[3])) {
-              planTrain = train;
+      this.queryLeftTickets(order.TRAIN_DATE, order.FROM_STATION_NAME, order.TO_STATION_NAME, order.PLAN_TRAINS)
+      .then(trains => {
+        var planTrains = [], that = this;
+        trains.some(train => {
+          return order.SEAT_CLASSES.some(seat => {
+            var seatNum = this.TICKET_TITLE.indexOf(seat);
+            if(train[seatNum] == "有" || train[seatNum] > 0) {
+              console.log(order.TRAIN_DATE+"/"+train[3]+"/"+train[seatNum]);
+              if(order.PLAN_TRAINS.includes(train[3])) {
+                planTrains.push(train);
+                return true;
+              }
             }
-          }
+            return false;
+          });
         });
 
-        if(planTrain) {
-          return planTrain;
+        if(planTrains.length > 0) {
+          return planTrains[0];
         }else {
           // console.log(chalk`{yellow 没有可购买余票 ${this.TRAIN_DATE[i]}}`);
           process.stdout.write(chalk`{yellow 没有可购买余票 ${order.TRAIN_DATE}}`);
@@ -190,6 +321,7 @@ export class Account {
       })
       .then((planTrain)=> {
           this.query = false;
+          // process.stdout.write(chalk`{yellow 有可购买余票 ${planTrain.toString()}}`);
           this.sjSmOReqCheckUser.next(planTrain[0]);
         },()=> {
           i = (i+1)%this.orders.length;
@@ -362,96 +494,6 @@ export class Account {
     });
   }
 
-  private buildLoginFlow(): void {
-    this.sjLoginInit.subscribe(()=> {
-      this.loginInit()
-        .then(()=>{
-          var tokens = this.checkAuthentication(this.cookiejar._jar.toJSON().cookies);
-          if(tokens.tk) {
-            return this.sjAppToken.next(tokens.tk);
-          }else if(tokens.uamtk) {
-            return this.sjNewAppToken.next();
-          }
-          this.sjCaptcha.next();
-        })
-        .catch((error: any)=> {
-          console.error(error);
-        });
-    });
-
-    this.sjCaptcha.subscribe(()=> {
-      this.getCaptcha().then(()=> this.checkCaptcha())
-        .then(()=> {
-          // 校验码成功后进行授权认证
-          console.log(chalk`{green.bold 验证码校验成功}`);
-          this.sjLogin.next();
-        }, (error: any)=> {
-          // 校验失败，重新校验
-          console.log(chalk`{yellow.bold 校验失败，重新校验}`);
-          this.sjCaptcha.next();
-        });
-    });
-
-    this.sjLogin.subscribe(()=> {
-      this.userAuthenticate()
-        .then(()=>{
-          console.log(chalk`{green.bold 登录成功}`);
-          this.sjNewAppToken.next();
-        }, (error: any)=>{
-          /*
-          {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
-          {"result_message":"验证码校验失败","result_code":"5"}
-          */
-          if(typeof error.result_code == "undefined") {
-            this.sjLogin.next();
-          }else {
-            if(error.result_code === 1) {
-              throw error.result_message;
-            }else if(error.result_code === 5) {
-              this.sjCaptcha.next();
-            }else {
-              this.sjCaptcha.next();
-            }
-          }
-        })
-        ;
-    });
-
-    this.sjNewAppToken.subscribe(()=> {
-      this.getNewAppToken()
-        .then((newapptk: string)=> this.sjAppToken.next(newapptk), (error: any)=> {
-          this.sjCaptcha.next();
-        });
-    });
-
-    this.sjAppToken.subscribe((newapptk: string)=> {
-      this.getAppToken(newapptk).then((x: string) => {
-        this.sjMyPage.next();
-      }, (error: any)=> {
-        console.log(chalk`{yellow.bold 获取Token失败}`);
-        console.log(error);
-        if(error.result_code && error.result_code === 2) {
-          this.sjCaptcha.next();
-        }else {
-          // TODO
-          setTimeout(x=> this.sjAppToken.next(newapptk), 1000);
-        }
-      });
-    });
-
-    this.sjMyPage.subscribe(()=> {
-      this.getMy12306()
-        .then(()=> {
-          console.log(chalk`{green.bold 登录成功}`);
-          this.sjLfTicketInit.next();
-        });
-    });
-  }
-
-  public submit(): void {
-    this.sjLoginInit.next();
-  }
-
   /**
    * 查询列车余票信息
    *
@@ -483,36 +525,34 @@ export class Account {
 
     var subjectLeftTicket = new Rx.Subject();
 
-    return new Promise((resolve, reject)=> {
-      subjectLeftTicket.subscribe(()=> {
-        this.queryLeftTicket(trainDate).then(trainsData => {
-          let trains: Array<Array<string>> = [];
+    return Rx.Observable.of(1)
+      .mergeMap(()=>this.queryLeftTicket(trainDate)
+                      .then((trainsData)=>trainsData,err=> {
+                        console.error(chalk`{yellow.bold ${error}}`);
+                        return Promise.reject(err);
+                      }))
+      .retry(Number.MAX_SAFE_INTEGER)
+      .map(trainsData => trainsData.result)
+      .map(result => {
+        let trains: Array<Array<string>> = [];
 
-          trainsData.result.forEach((element: string)=> {
-            let train: Array<string> = element.split("|");
-            train[4] = this.stations.getStationName(train[4]);
-            train[5] = this.stations.getStationName(train[5]);
-            train[6] = this.stations.getStationName(train[6]);
-            train[7] = this.stations.getStationName(train[7]);
-            train[11] = train[11] == "IS_TIME_NOT_BUY" ? "列车停运":train[11];
-            // train[11] = train[11] == "N" ? "无票":train[11];
-            // train[11] = train[11] == "Y" ? "有票":train[11];
-            // 匹配输入的列车名称的正则表达式条件
-            if(!trainNames || trainNames.filter(tn=>train[3].match(new RegExp(tn)) != null).length > 0) {
-              trains.push(train);
-            }
-          });
-
-          resolve(trains);
-        }, error=> {
-          console.error(chalk`{yellow.bold ${error}}`);
-          subjectLeftTicket.next();
-        })
-        .catch(error=>console.error(error));
-      }, err=>console.error(err));
-
-      subjectLeftTicket.next();
-    });
+        result.forEach((element: string)=> {
+          let train: Array<string> = element.split("|");
+          train[4] = this.stations.getStationName(train[4]);
+          train[5] = this.stations.getStationName(train[5]);
+          train[6] = this.stations.getStationName(train[6]);
+          train[7] = this.stations.getStationName(train[7]);
+          train[11] = train[11] == "IS_TIME_NOT_BUY" ? "列车停运":train[11];
+          // train[11] = train[11] == "N" ? "无票":train[11];
+          // train[11] = train[11] == "Y" ? "有票":train[11];
+          // 匹配输入的列车名称的正则表达式条件
+          if(!trainNames || trainNames.filter(tn=>train[3].match(new RegExp(tn)) != null).length > 0) {
+            trains.push(train);
+          }
+        });
+        return trains;
+      })
+      .toPromise();
   }
 
   /**
@@ -558,10 +598,7 @@ export class Account {
   }
 
   private renderTrainListTitle(trains: Array<Array<string>>): Array<Array<string>> {
-    var title = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
-                 '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
-                 '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
-    title = title.map(t=>chalk`{blue ${t}}`);
+    var title = this.TICKET_TITLE.map(t=>chalk`{blue ${t}}`);
 
     trains.forEach((train, index)=> {
       if(index % 30 === 0) {
