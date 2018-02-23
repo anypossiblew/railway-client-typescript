@@ -69,7 +69,7 @@ export class Account {
     this.request = request.defaults({jar: this.cookiejar});
   }
 
-  public createOrder(trainDates: string, backTrainDate: string,
+  public createOrder(trainDates: Array<string>, backTrainDate: string,
                      fromStationName: string, toStationName: string,
                      planTrains: Array<string>, planPepoles: Array<string>): this {
 
@@ -394,7 +394,10 @@ export class Account {
 
     this.sjLogin.subscribe(()=> {
       this.userAuthenticate()
-        .then(()=>this.sjNewAppToken.next(), (error: any)=>{
+        .then(()=>{
+          console.log(chalk`{green.bold 登录成功}`);
+          this.sjNewAppToken.next();
+        }, (error: any)=>{
           /*
           {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
           {"result_message":"验证码校验失败","result_code":"5"}
@@ -449,85 +452,133 @@ export class Account {
     this.sjLoginInit.next();
   }
 
-  public queryLeftTickets(trainDate, fromStationName, toStationName, bypassStationName) {
+  /**
+   * 查询列车余票信息
+   *
+   * @param trainDate 乘车日期
+   * @param fromStationName 出发站
+   * @param toStationName 到达站
+   * @param trainNames 列车
+   *
+   * @return Promise
+   */
+  public queryLeftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: Array<string>|null): Promise<Array<any>> {
+    if(!trainDate) {
+      console.log(chalk`{yellow 请输入乘车日期}`);
+      return;
+    }
     this.BACK_TRAIN_DATE = trainDate;
+    if(!fromStationName) {
+      console.log(chalk`{yellow 请输入出发站}`);
+      return;
+    }
     this.FROM_STATION_NAME = fromStationName;
+    if(!toStationName) {
+      console.log(chalk`{yellow 请输入到达站}`);
+      return;
+    }
     this.TO_STATION_NAME = toStationName;
     this.FROM_STATION = this.stations.getStationCode(fromStationName);
     this.TO_STATION = this.stations.getStationCode(toStationName);
 
     var subjectLeftTicket = new Rx.Subject();
 
-    subjectLeftTicket.subscribe(()=> {
-      this.queryLeftTicket(trainDate).then(trainsData => {
-        let trains: Array<Array<string>> = [];
-        var title = ['车次', '出发', '到达', '出发', '到达', '历时', '可买', '高级软卧', '', '软卧', '软座', '特等座', '无座', '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
-        trains.push(title);
-        trainsData.result.forEach((element: string)=> {
-          let train: Array<string> = element.split("|");
-          // train.splice(0, 3);
-          // train.splice(1, 2);
-          // train.splice(7, 9);
-          // train.splice(19, 4);
-          // train[1] = this.stations.getStationName(train[1]);
-          // train[2] = this.stations.getStationName(train[2]);
-          trains.push(train);
-          if(trains.length % 30 === 0) {
-            trains.push(title);
-          }
-        });
+    return new Promise((resolve, reject)=> {
+      subjectLeftTicket.subscribe(()=> {
+        this.queryLeftTicket(trainDate).then(trainsData => {
+          let trains: Array<Array<string>> = [];
 
-        var columns = columnify(trains, {
-          columnSplitter: ' | '
+          trainsData.result.forEach((element: string)=> {
+            let train: Array<string> = element.split("|");
+            train[4] = this.stations.getStationName(train[4]);
+            train[5] = this.stations.getStationName(train[5]);
+            train[6] = this.stations.getStationName(train[6]);
+            train[7] = this.stations.getStationName(train[7]);
+            train[11] = train[11] == "IS_TIME_NOT_BUY" ? "列车停运":train[11];
+            // train[11] = train[11] == "N" ? "无票":train[11];
+            // train[11] = train[11] == "Y" ? "有票":train[11];
+            // 匹配输入的列车名称的正则表达式条件
+            if(!trainNames || trainNames.filter(tn=>train[3].match(new RegExp(tn)) != null).length > 0) {
+              trains.push(train);
+            }
+          });
+
+          resolve(trains);
+        }, error=> {
+          console.error(chalk`{yellow.bold ${error}}`);
+          subjectLeftTicket.next();
         })
+        .catch(error=>console.error(error));
+      }, err=>console.error(err));
 
-        console.log(columns);
-      }, error=> {
-        console.error(chalk`{yellow.bold ${error}}`);
-        subjectLeftTicket.next();
-      })
-      .catch(error=>console.error(error));
+      subjectLeftTicket.next();
     });
-
-    subjectLeftTicket.next();
   }
 
-  public leftTicketReport() {
-    this.setOrder(this.orders[0]);
-    var subjectLeftTicket = new Rx.Subject();
+  /**
+   * 查询列车余票信息
+   *
+   * @param trainDate 乘车日期
+   * @param fromStationName 出发站
+   * @param passStationName 途经站
+   * @param toStationName 到达站
+   *
+   * @return void
+   */
+  public passStationTickets(trainDate: string, fromStationName: string, passStationName: string, toStationName: string, trainNames: string) {
+    let planTrainNames: Array<string>|null = (trainNames ? trainNames.split(','):null);
+    this.queryLeftTickets(trainDate, fromStationName, toStationName, planTrainNames)
+      .then(trains=> {
+        trains = trains.map(train => train[3]);
+        this.queryLeftTickets(trainDate, fromStationName, passStationName, planTrainNames)
+          .then(passTrains=> {
+            let result = passTrains.filter(train => trains.includes(train[3]));
+            result = this.renderTrainListTitle(result);
+            this.renderLeftTickets(result);
+          });
+      });
+  }
 
-    subjectLeftTicket.subscribe(()=> {
-      this.queryLeftTicket(this.TRAIN_DATE).then(trainsData => {
-        let trains: Array<Array<string>> = [];
-        var title = ['车次', '出发', '到达', '出发', '到达', '历时', '可买', '高级软卧', '', '软卧', '软座', '特等座', '无座', '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
-        trains.push(title);
-        trainsData.result.forEach((element: string)=> {
-          let train: Array<string> = element.split("|");
-          train.splice(0, 3);
-          train.splice(1, 2);
-          train.splice(7, 9);
-          train.splice(19, 4);
-          train[1] = this.stations.getStationName(train[1]);
-          train[2] = this.stations.getStationName(train[2]);
-          trains.push(train);
-          if(trains.length % 30 === 0) {
-            trains.push(title);
-          }
-        });
+  /**
+   * 查询列车余票信息
+   *
+   * @param trainDate 乘车日期
+   * @param fromStationName 出发站
+   * @param toStationName 到达站
+   * @param trainNames 列车
+   *
+   * @return void
+   */
+  public leftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: string) {
+    this.queryLeftTickets(trainDate, fromStationName, toStationName, (trainNames ? trainNames.split(','):null))
+      .then(trains=> {
+        trains = this.renderTrainListTitle(trains);
+        this.renderLeftTickets(trains);
+      });
+  }
 
-        var columns = columnify(trains, {
-          columnSplitter: ' | '
-        })
+  private renderTrainListTitle(trains: Array<Array<string>>): Array<Array<string>> {
+    var title = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
+                 '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
+                 '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
+    title = title.map(t=>chalk`{blue ${t}}`);
 
-        console.log(columns);
-      }, error=> {
-        console.error(chalk`{yellow.bold ${error}}`);
-        subjectLeftTicket.next();
-      })
-      .catch(error=>console.error(error));
-    });
+    trains.forEach((train, index)=> {
+      if(index % 30 === 0) {
+        trains.splice(index, 0, title);
+      }
+    })
+    return trains;
+  }
 
-    subjectLeftTicket.next();
+  private renderLeftTickets(trains: Array<Array<string>>) {
+    var columns = columnify(trains, {
+      columnSplitter: '|',
+      columns: ["3", "4", "5", "6", "7", "8", "9", "10", "11", "20", "21", "22", "23", "24", "25",
+                "26", "27", "28", "29", "30", "31", "32"]
+    })
+
+    console.log(columns);
   }
 
   public myOrderNoCompleteReport() {
@@ -600,18 +651,50 @@ export class Account {
 
   }
 
-  private checkCaptcha(): Promise {
-    var url = "https://kyfw.12306.cn/passport/captcha/captcha-check";
-
+  private questionCaptcha(): Promise<string> {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
-
-    return new Promise((resolve, reject) => {
-      rl.question(chalk`{red.bold 请输入验证码}:`, (positions) => {
+    return new Promise<string>((resolve: Function, reject: Function)=> {
+      rl.question(chalk`{red.bold 请输入验证码}:`, (positionStr) => {
         rl.close();
 
+        if(typeof positionStr == "string") {
+          let positions: Array<string> = [];
+          positionStr.split(',').forEach(el=>positions=positions.concat(el.split(' ')));
+          resolve(positions.map((position: string)=> {
+            switch(position) {
+              case "1":
+                return "40,45";
+              case "2":
+                return "110,45";
+              case "3":
+                return "180,45";
+              case "4":
+                return "250,45";
+              case "5":
+                return "40,110";
+              case "6":
+                return "110,110";
+              case "7":
+                return "180,110";
+              case "8":
+                return "250,110";
+            }
+          }).join(','));
+        }else {
+          reject("输入格式错误");
+        }
+      });
+    });
+  }
+
+  private checkCaptcha(): Promise {
+    var url = "https://kyfw.12306.cn/passport/captcha/captcha-check";
+
+    return new Promise<void>((resolve: Function, reject: Function) => {
+      this.questionCaptcha().then(positions=> {
         var data = {
             "answer": positions,
             "login_site": "E",
@@ -631,7 +714,7 @@ export class Account {
           }
           if(response.statusCode === 200) {
             body = JSON.parse(body);
-            console.log(body.result_message);
+            // console.log(body.result_message);
             if(body.result_code == 4) {
               resolve();
             }
@@ -642,6 +725,8 @@ export class Account {
             reject();
           }
         });
+      }, error=>{
+        console.error(error);
       });
     });
   }
@@ -668,9 +753,9 @@ export class Account {
         if(error) return reject(error);
 
         if(response.statusCode === 200) {
-          console.log(body);
+          // console.log(body);
           body = JSON.parse(body);
-          console.log(body.result_message);
+          // console.log(body.result_message);
           if(body.result_code == 2) {
             throw body.result_message;
           }else if(body.result_code != 0) {
@@ -969,7 +1054,7 @@ export class Account {
     });
   }
 
-  private getPassengers(token: string): Promise {
+  private getPassengers(token: string): Promise<object> {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/getPassengerDTOs";
 
     var data = {
@@ -986,7 +1071,7 @@ export class Account {
       ,form: data
     };
 
-    return new Promise((resolve, reject)=> {
+    return new Promise<object>((resolve: Function, reject: Function)=> {
       this.request(options, (error, response, body)=> {
         if(error) throw error;
 
@@ -1069,13 +1154,26 @@ export class Account {
       ,form: data
     };
 
-    return new Promise((resolve, reject)=> {
+    return new Promise((resolve: Function, reject: Function)=> {
       this.request(options, (error, response, body)=> {
         if(error) throw error;
 
         if(response.statusCode === 200) {
           if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            return resolve(JSON.parse(body));
+            let result = JSON.parse(body);
+            /*
+              { validateMessagesShowId: '_validatorMessage',
+                url: '/leftTicket/init',
+                status: false,
+                httpstatus: 200,
+                messages: [ '系统忙，请稍后重试' ],
+                validateMessages: {} }
+             */
+            if(result.status) {
+              return resolve(result);
+            }else {
+              return reject(result.messages[0])
+            }
           }
         }
 
@@ -1116,7 +1214,19 @@ export class Account {
 
         if(response.statusCode === 200) {
           if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            return resolve(JSON.parse(body));
+            /*
+              { validateMessagesShowId: '_validatorMessage',
+                status: false,
+                httpstatus: 200,
+                messages: [ '系统繁忙，请稍后重试！' ],
+                validateMessages: {} }
+             */
+            let result = JSON.parse(body);
+            if(result.status) {
+              return resolve(result);
+            }else {
+              return reject(result.messages[0]);
+            }
           }
         }
 

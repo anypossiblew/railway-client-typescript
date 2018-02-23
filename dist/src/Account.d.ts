@@ -24,7 +24,7 @@ export declare class Account {
      */
     private isSystemBussy(body);
     setRequest(): void;
-    createOrder(trainDates: string, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
+    createOrder(trainDates: Array<string>, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>): this;
     private setOrder(order);
     cancelOrderQueue(): void;
     private sjLoginInit;
@@ -47,11 +47,45 @@ export declare class Account {
     private buildOrderFlow();
     private buildLoginFlow();
     submit(): void;
-    queryLeftTickets(trainDate: any, fromStationName: any, toStationName: any, bypassStationName: any): void;
-    leftTicketReport(): void;
+    /**
+     * 查询列车余票信息
+     *
+     * @param trainDate 乘车日期
+     * @param fromStationName 出发站
+     * @param toStationName 到达站
+     * @param trainNames 列车
+     *
+     * @return Promise
+     */
+    queryLeftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: Array<string> | null): Promise<Array<any>>;
+    /**
+     * 查询列车余票信息
+     *
+     * @param trainDate 乘车日期
+     * @param fromStationName 出发站
+     * @param passStationName 途经站
+     * @param toStationName 到达站
+     *
+     * @return void
+     */
+    passStationTickets(trainDate: string, fromStationName: string, passStationName: string, toStationName: string, trainNames: string): void;
+    /**
+     * 查询列车余票信息
+     *
+     * @param trainDate 乘车日期
+     * @param fromStationName 出发站
+     * @param toStationName 到达站
+     * @param trainNames 列车
+     *
+     * @return void
+     */
+    leftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: string): void;
+    private renderTrainListTitle(trains);
+    private renderLeftTickets(trains);
     myOrderNoCompleteReport(): void;
     loginInit(): Promise<void>;
     private getCaptcha();
+    private questionCaptcha();
     private checkCaptcha();
     private userAuthenticate();
     private getNewAppToken();
