@@ -59,4 +59,4 @@ typings/
 
 captcha.BMP
 cookies*.json
-cookies/
+cookies/*.json

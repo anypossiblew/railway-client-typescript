@@ -1,5 +1,6 @@
  // https://www.lanindex.com/12306%E8%B4%AD%E7%A5%A8%E6%B5%81%E7%A8%8B%E5%85%A8%E8%A7%A3%E6%9E%90/
 
+import winston = require('winston');
 import {FileCookieStore} from './FileCookieStore';
 import {Station} from './Station';
 import request = require('request');
@@ -14,14 +15,8 @@ import columnify = require('columnify');
 export class Account {
   public userName : string;
   public userPassword : string;
-  public TRAIN_DATE: string;
-  public BACK_TRAIN_DATE: string;
-  public PLAN_TRAINS: Array<string>;
-  public PLAN_PEPOLES: Array<string>;
-  public FROM_STATION: string;
-  public TO_STATION: string;
-  public FROM_STATION_NAME: string;
-  public TO_STATION_NAME: string;
+  private checkUserTimer = Rx.Observable.timer(0, 1000*60*20);
+  private scptCheckUserTimer: Rx.Subscription;
 
   private stations: Station = new Station();
   private passengers: object;
@@ -39,6 +34,10 @@ export class Account {
     ,"Referer": "https://kyfw.12306.cn/otn/passport?redirect=/otn/"
   };
 
+  private TICKET_TITLE = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
+               '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
+               '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
+
   private query = false;
 
   private orders: Array<object> = [];
@@ -48,8 +47,8 @@ export class Account {
     this.userPassword = userPassword;
 
     this.setRequest();
-    this.buildLoginFlow();
-    this.buildOrderFlow();
+    this.build();
+
   }
 
   /**
@@ -69,38 +68,42 @@ export class Account {
     this.request = request.defaults({jar: this.cookiejar});
   }
 
-  public createOrder(trainDates: Array<string>, backTrainDate: string,
-                     fromStationName: string, toStationName: string,
-                     planTrains: Array<string>, planPepoles: Array<string>): this {
+  private nextOrderNum: Number = 0;
+  private nextOrder() {
+    this.nextOrderNum = (this.nextOrderNum+1)%this.orders.length;
+    return this.orders[this.nextOrderNum];
+  }
 
-    // if(typeof trainDate == "object" && trainDate.constructor.name == "Array") {
-    //
-    // }
+  private currentOrder() {
+    return this.orders[this.nextOrderNum];
+  }
+
+  public createOrder(trainDates: Array<string>, backTrainDate: string,
+                     [fromStationName, toStationName, passStationName],
+                     planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this {
     trainDates.forEach(trainDate=> {
       this.orders.push({
-        TRAIN_DATE: trainDate
-        ,BACK_TRAIN_DATE: backTrainDate
-        ,FROM_STATION_NAME: fromStationName;
-        ,TO_STATION_NAME: toStationName;
+        trainDate: trainDate
+        ,backTrainDate: backTrainDate
+        ,fromStationName: fromStationName;
+        ,toStationName: toStationName;
+        ,passStationName: passStationName,
         ,PLAN_TRAINS: planTrains;
-        ,PLAN_PEPOLES: planPepoles;
+        ,planPepoles: planPepoles;
         ,FROM_STATION: this.stations.getStationCode(fromStationName);
         ,TO_STATION: this.stations.getStationCode(toStationName);
+        ,seatClasses: seatClasses
       })
     });
 
     return this;
   }
 
-  private setOrder(order) {
-    this.TRAIN_DATE = order.TRAIN_DATE;
-    this.BACK_TRAIN_DATE = order.BACK_TRAIN_DATE;
-    this.FROM_STATION_NAME = order.FROM_STATION_NAME;
-    this.TO_STATION_NAME = order.TO_STATION_NAME;
-    this.PLAN_TRAINS = order.PLAN_TRAINS;
-    this.PLAN_PEPOLES = order.PLAN_PEPOLES;
-    this.FROM_STATION = order.FROM_STATION;
-    this.TO_STATION = order.TO_STATION;
+  public orderWaitTime() {
+    let sjOrderWaitTime = new Rx.Subject();
+    this.buildLoginFlow(sjOrderWaitTime)
+      .subscribe(()=>this.sjQueryOrderWaitT.next());
+    sjOrderWaitTime.next();
   }
 
   public cancelOrderQueue() {
@@ -114,18 +117,181 @@ export class Account {
       }, error=> console.error(error));
   }
 
-  // Login init
-  private sjLoginInit   = new Rx.Subject();
-  // Check Captcha
-  private sjCaptcha     = new Rx.Subject();
-  // Login
-  private sjLogin       = new Rx.Subject();
-  // Get new app token
-  private sjNewAppToken = new Rx.Subject();
-  // Get app token
-  private sjAppToken    = new Rx.Subject<string>();
-  // Get my main page
-  private sjMyPage      = new Rx.Subject();
+  public submit(): void {
+    let sjL = new Rx.Subject();
+    let sjCheckUser = new Rx.Subject();
+    this.buildLoginFlow(sjL)
+      .subscribe(()=>{
+        this.buildOrderFlow().next();
+        this.scptCheckUserTimer =
+          this.checkUserTimer.subscribe((i)=> {
+            // console.log(i);
+            sjCheckUser.next();
+          });
+      });
+
+    //
+    this.buildCheckUserFlow(sjCheckUser)
+      .subscribe(()=>winston.debug("Check user done"));
+
+    sjL.next();
+  }
+
+  private buildAuthFlow(subject: Rx.Subject,
+                        sjNewAppToken: Rx.ReplaySubject = new Rx.ReplaySubject(),
+                        sjAppToken: Rx.ReplaySubject = new Rx.ReplaySubject()) {
+    let sjCaptcha = new Rx.ReplaySubject();
+    let sjLogin = new Rx.ReplaySubject();
+    let sjMyPage = new Rx.Subject();
+
+    subject.subscribe(sjCaptcha);
+
+    sjCaptcha.mergeMap(()=>this.getCaptcha())
+            .mergeMap(()=>this.checkCaptcha().then(()=>{
+              // 校验码成功后进行授权认证
+              console.log(chalk`{green.bold 验证码校验成功}`);
+            },err=> {
+              // 校验失败，重新校验
+              console.log(chalk`{yellow.bold 校验失败，重新校验}`);
+              return Promise.reject(err);
+            }))
+            .retry(Number.MAX_SAFE_INTEGER)
+            .subscribe(()=>sjLogin.next(1), err=>console.error(err));
+
+    sjLogin
+      .mergeMap(()=>
+        this.userAuthenticate()
+            .then(()=> {
+              console.log(chalk`{green.bold 登录成功}`);
+            },err=> {
+              /*
+              {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
+              {"result_message":"验证码校验失败","result_code":"5"}
+              */
+              if(typeof err.result_code == "undefined") {
+                return Promise.reject(err);
+              }else {
+                console.log(chalk`{yellow.bold ${err.result_message}}`);
+                return err;
+                // if(error.result_code === 1) {
+                //   throw error.result_message;
+                // }else if(error.result_code === 5) {
+                //   this.sjCaptcha.next();
+                // }else {
+                //   this.sjCaptcha.next();
+                // }
+              }
+            })
+      )
+      .retry(Number.MAX_SAFE_INTEGER)
+      .subscribe((err)=> {
+        // 登录失败将重新从校验码开始
+        if(err) {
+          sjCaptcha.next(1);
+        }else {
+          sjNewAppToken.next();
+        }
+      });
+      ;
+
+    sjNewAppToken
+      .mergeMap(()=>this.getNewAppToken())
+      .subscribe((newapptk: string)=> {
+        sjAppToken.next(newapptk)
+      },err=> {
+        sjCaptcha.next(1);
+      });
+
+    sjAppToken
+      .mergeMap((newapptk: string)=>this.getAppToken(newapptk)
+        .then((x: string) => , (err: any)=> {
+          console.log(chalk`{yellow.bold 获取Token失败}`);
+          console.log(err);
+          if(err.result_code && err.result_code === 2) {
+            return err;
+          }else {
+            return Promise.reject(err);
+          }
+        }))
+      .retry(Number.MAX_SAFE_INTEGER)
+      .subscribe((err: any) => {
+        if(err) {
+          sjCaptcha.next(1);
+        }else {
+          sjMyPage.next();
+        }
+      }, (error: any)=> {
+        console.log(error);
+      });
+
+    return sjMyPage;
+  }
+
+  private build() {
+
+    this.sjQueryOrderWaitT
+        .mergeMap((orderRequest: object)=>
+          this.queryOrderWaitTime(orderRequest&&(orderRequest.token||""))
+            .then(orderQueue=> {
+              if(orderQueue.status) {
+                if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
+                  return console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
+                }else if(orderQueue.data.waitTime === -2){
+                  if(orderQueue.data.msg) {
+                    return console.log(chalk`{yellow.bold ${orderQueue.data.msg}}`);
+                  }
+                  return console.log(orderQueue);
+                }else if(orderQueue.data.waitTime === -3){
+                  return console.log("Your ticket request has been canceled!");
+                }else if(orderQueue.data.waitTime === -4){
+                  console.log("Your ticket request is being processed, please wait a moment!");
+                }else {
+                  console.log(chalk`{yellow.bold 排队人数：${orderQueue.data.waitCount}} 预计等待时间：${parseInt(orderQueue.data.waitTime / 1.5)} 分钟`);
+                }
+              }else {
+                console.log(orderQueue);
+              }
+              return new Promise((resolve, reject)=> {
+                setTimeout(x=> {
+                  reject();
+                }, 4000);
+              });
+            },err=> {
+              console.error(err);
+              return Promise.reject(err);
+            })
+      )
+      .retry(Number.MAX_SAFE_INTEGER)
+      .subscribe((orderRequest: object)=> {
+        console.log(chalk`{yellow 结束}`);
+        this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
+      },err=>console.log(chalk`{yellow 错误结束 ${err}}`));
+  }
+
+  private buildLoginFlow(observable: Rx.Observable): void {
+    let sjLoginInit = new Rx.ReplaySubject();
+    let sjCaptcha = new Rx.Subject();
+    let sjNewAppToken = new Rx.ReplaySubject();
+    let sjAppToken = new Rx.ReplaySubject();
+
+    observable.subscribe(sjLoginInit);
+
+    // 登录初始化
+    sjLoginInit
+      .mergeMap(order=>this.loginInit())
+      .retry(Number.MAX_SAFE_INTEGER)
+      .map(order => this.checkAuthentication(this.cookiejar._jar.toJSON().cookies))
+      .subscribe(tokens=> {
+        if(tokens.tk) {
+          return sjAppToken.next(tokens.tk);
+        }else if(tokens.uamtk) {
+          return sjNewAppToken.next();
+        }
+        sjCaptcha.next(1);
+      });
+
+    return this.buildAuthFlow(sjCaptcha, sjNewAppToken, sjAppToken);
+  }
 
   private sjLfTicketInit      = new Rx.Subject();
   private sjQueryLfTicket     = new Rx.Subject();
@@ -133,121 +299,149 @@ export class Account {
   private sjSmOrderReq        = new Rx.Subject<string>();
   private sjCPasInitDc        = new Rx.Subject<string>();
   private sjGetPassengers     = new Rx.Subject<object>();
-  private sjCheckOrderInfo    = new Rx.Subject<object>();
+  private sjCheckOrderInfo    = new Rx.ReplaySubject<object>();
   private sjGetQueueCount     = new Rx.Subject();
   private sjGetPassCodeNew    = new Rx.Subject();
   private sjConfirmSingle4Q   = new Rx.Subject();
-  private sjQueryOrderWaitT   = new Rx.Subject();
+  private sjQueryOrderWaitT   = new Rx.ReplaySubject();
 
-  private buildOrderFlow() {
+  private buildQueryLeftTicketFlow(observable: Rx.Observable): Rx.Observable {
+    let sjQueryLfTicket = new Rx.ReplaySubject();
+
+    observable.subscribe(sjQueryLfTicket);
+
+    return sjQueryLfTicket
+      .do(order=>{
+        // this.setOrder(order);
+        if(this.query) {
+          process.stdout.clearLine();
+          process.stdout.cursorTo(0);
+        }
+      })
+      .mergeMap(order=>
+        this.queryLeftTickets(order.trainDate, order.fromStationName, order.toStationName, order.PLAN_TRAINS)
+          .then((trains)=> {
+            order.trains = trains;
+            return order;
+          },err=>console.error(err))
+      )
+      .mergeMap(order=>{
+        if(order.passStationName) {
+          if(!order.fromToPassTrains) {
+            return this.queryLeftTickets(order.trainDate, order.fromStationName, order.passStationName, order.PLAN_TRAINS)
+              .then(passTrains=> {
+                order.fromToPassTrains = passTrains.map(train => train[3]);
+                return order;
+              });
+          }else {
+            return Promise.resolve(order);
+          }
+        }else {
+          return Promise.resolve(order);
+        }
+      })
+      .map(order=> {
+        if(order.fromToPassTrains) {
+          order.trains = order.trains.filter(train => order.fromToPassTrains.includes(train[3]));
+        }
+        return order;
+      })
+      .map(order=> {
+        let trains = order.trains||[];
+
+        var planTrains = [], that = this;
+        trains.some(train => {
+          return order.seatClasses.some(seat => {
+            var seatNum = this.TICKET_TITLE.indexOf(seat);
+            if(train[seatNum] == "有" || train[seatNum] > 0) {
+              console.log(order.trainDate+"/"+train[3]+"/"+train[seatNum]);
+              if(order.PLAN_TRAINS.includes(train[3])) {
+                planTrains.push(train);
+                return true;
+              }
+            }
+            return false;
+          });
+        });
+
+        order.availableTrains = planTrains;
+        return order;
+      });
+  }
+
+  private buildOrderFlow(): Rx.Observable {
+
+    let sjQueryLfTicket = new Rx.Subject();
+    let sjSmOReqCheckUser = new Rx.Subject();
+
     // 初始化查询火车余票页面
     this.sjLfTicketInit.subscribe(()=> {
       this.leftTicketInit()
-        .then(()=>this.sjQueryLfTicket.next(0), (error: any)=> {
-          console.error(error);
+        .then(()=>sjQueryLfTicket.next(this.nextOrder()), (error: any)=> {
+          winston.error(error);
         });
     });
 
-    // 查询火车余票
-    this.sjQueryLfTicket.subscribe((i)=> {
-
-      let order = this.orders[i];
-      this.setOrder(order);
-
-      if(this.query) {
-        process.stdout.clearLine();
-        process.stdout.cursorTo(0);
-      }
-
-      this.queryLeftTicket(order.TRAIN_DATE).then(trainsData => {
-        //console.log(trainsData);
-        var trains = trainsData.result;
-
-        //console.log("查询到火车数量 "+trains.length);
-        var planTrain, that = this;
-        trains.forEach(function(train) {
-          train = train.split("|");
-
-          if(train[30] == "有" || (train[30] > 0 && train[30] != "无" && train[30] != "0")) {
-            console.log(order.TRAIN_DATE+"/"+train[3]+"/"+train[30]);
-            if(order.PLAN_TRAINS.includes(train[3])) {
-              planTrain = train;
-            }
-          }
-        });
-
-        if(planTrain) {
-          return planTrain;
+    this.buildQueryLeftTicketFlow(sjQueryLfTicket)
+      .subscribe(order=> {
+        if(order.availableTrains.length > 0) {
+          this.query = false;
+          // process.stdout.write(chalk`{yellow 有可购买余票 ${planTrain.toString()}}`);
+          order.trainSecretStr = order.availableTrains[0][0];
+          sjSmOReqCheckUser.next(order);
         }else {
           // console.log(chalk`{yellow 没有可购买余票 ${this.TRAIN_DATE[i]}}`);
-          process.stdout.write(chalk`{yellow 没有可购买余票 ${order.TRAIN_DATE}}`);
-          return Promise.reject();
-        }
-      }, err => {
-        // console.error(chalk`{yellow ${err}}`);
-        process.stdout.write(chalk`{yellow ${err}}`);
-        return Promise.reject();
-      })
-      .then((planTrain)=> {
-          this.query = false;
-          this.sjSmOReqCheckUser.next(planTrain[0]);
-        },()=> {
-          i = (i+1)%this.orders.length;
+          process.stdout.write(chalk`没有可购买余票 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} ${order.passStationName?'途经'+order.passStationName+' ':''}{yellow ${order.trainDate}}`);
           setTimeout(()=> {
-            this.sjQueryLfTicket.next(i);
+            sjQueryLfTicket.next(this.nextOrder());
           }, 1500);
           this.query = true;
-        });
-    });
-
-    // Step 10 验证登录，Post
-    this.sjSmOReqCheckUser.subscribe((train: string)=> {
-      console.log("submit order request check user");
-      this.checkUser().then(()=>this.sjSmOrderReq.next(train), error => {
-        console.error("Check user error ");
-        console.error(error);
-        /* TODO add relogin logic
-        { validateMessagesShowId: '_validatorMessage',
-          status: true,
-          httpstatus: 200,
-          data: { flag: false },
-          messages: [],
-          validateMessages: {} }
-        */
-        this.sjSmOReqCheckUser.next(train);
+        }
+      },err=> {
+        console.error(err);
       });
-    });
+
+    this.buildCheckUserFlow(sjSmOReqCheckUser)
+      .subscribe(order=>this.sjSmOrderReq.next(this.currentOrder()));
 
     // Step 11 预提交订单，Post
-    this.sjSmOrderReq.subscribe((train: string)=> {
+    this.sjSmOrderReq.subscribe(order=> {
       console.log("submit order request");
-      this.submitOrderRequest(train).then((x)=> {
-          console.log("Submit Order Request success!")
-          this.sjCPasInitDc.next();
+      this.submitOrderRequest(order)
+        .then((body)=> {
+          if(body.status) {
+            winston.debug(chalk`{yellow Submit Order Request success!}`);
+            this.sjCPasInitDc.next(order);
+          }else {
+            // 您还有未处理的订单
+            // 该车次暂不办理业务
+            console.error(chalk`{red.bold ${body.messages[0]}}`);
+          }
         }, error=> {
-          console.error("SubmitOrderRequest error " + error);
-          this.sjSmOrderReq.next(train);
+          winston.error("SubmitOrderRequest error " + error);
+          this.sjSmOrderReq.next(order);
         });
     });
 
     // Step 12 模拟跳转页面InitDc，Post
-    this.sjCPasInitDc.subscribe((train: string)=> {
+    this.sjCPasInitDc.subscribe(order=> {
       this.confirmPassengerInitDc().then((orderRequest: object)=> {
-        console.log("confirmPassenger Init Dc success! "+orderRequest.token);
+        winston.debug("confirmPassenger Init Dc success! "+orderRequest.token);
+        order.request = orderRequest;
         // console.log(orderRequest.ticketInfo);
         if(this.passengers) {
-          orderRequest.passengers = this.passengers;
-          this.sjCheckOrderInfo.next(orderRequest);
+          order.request.passengers = this.passengers;
+          this.sjCheckOrderInfo.next(order);
         }else {
-          this.sjGetPassengers.next(orderRequest);
+          this.sjGetPassengers.next(order);
         }
       }, error=> {
         if(error == this.SYSTEM_BUSSY) {
           console.log(error);
-          this.sjCPasInitDc.next();
+          this.sjCPasInitDc.next(order);
         }else if(error == this.SYSTEM_MOVED) {
           console.log(error);
-          this.sjCPasInitDc.next();
+          this.sjCPasInitDc.next(order);
         }else {
           console.error(error);
         }
@@ -255,58 +449,78 @@ export class Account {
     });
 
     // Step 13 常用联系人确定，Post
-    this.sjGetPassengers.subscribe((orderRequest: object)=> {
-      this.getPassengers(orderRequest.token).then(passengers=> {
+    this.sjGetPassengers.subscribe((order: object)=> {
+      this.getPassengers(order.request.token).then(passengers=> {
         this.passengers = passengers;
-        orderRequest.passengers = passengers;
-        this.sjCheckOrderInfo.next(orderRequest);
+        order.request.passengers = passengers;
+        this.sjCheckOrderInfo.next(order);
       }, error=> {
-        console.error(error + " Retry get passengers");
-        this.sjGetPassengers.next(orderRequest);
+        winston.error(error + " Retry get passengers");
+        this.sjGetPassengers.next(order);
       })
-      .catch(error=> console.error(error));
+      .catch(error=> winston.error(error));
     });
 
-    // Step 14 购票人确定，Post
-    this.sjCheckOrderInfo.subscribe((orderRequest: object)=> {
-      this.checkOrderInfo(orderRequest.token, orderRequest.passengers.data.normal_passengers)
-        .then(orderInfo=> {
-          console.log(orderInfo);
-          // Step 15 准备进入排队，Post
-          this.getQueueCount(orderRequest.token, orderRequest.orderRequest, orderRequest.ticketInfo)
-            .then(x=> {
-              console.log(x);
-              // 若 Step 14 中的 "ifShowPassCode" = "Y"，那么多了输入验证码这一步，Post
-              if(orderInfo.data.ifShowPassCode == "Y") {
-                this.sjGetPassCodeNew.next(orderRequest);
-              }else {
-                // Step 17 确认购买，Post
-                this.sjConfirmSingle4Q.next(orderRequest);
-              }
-            }, error=> {
-              console.error(error);
-          });
-        }, error=> {
-          console.error(error);
-          this.sjCheckOrderInfo.next(orderRequest);
-      });
-    });
+    this.sjCheckOrderInfo
+      .mergeMap((order: object)=>
+        // Step 14 购票人确定，Post
+        this.checkOrderInfo(order.request.token, order.request.passengers.data.normal_passengers, order.planPepoles)
+            .then(orderInfo => {
+                // console.log(orderInfo);
+                order.request.orderInfo = orderInfo;
+                return order;
+              },err => {
+                if(err == "没有相关联系人") {
+                  return err;
+                }else {
+                  return Promise.reject(err);
+                }
+              }))
+      .retry(100)
+      .mergeMap((order)=> {
+        if(typeof order == "string") {
+          return Promise.reject(order);
+        }else {
+          return Promise.resolve(order);
+        }
+      })
+      // Step 15 准备进入排队，Post
+      .mergeMap(order =>
+        this.getQueueCount(order.request.token, order.request.orderRequest, order.request.ticketInfo)
+          .then((response)=>{
+            order.request.queueInfo = response;
+            return order
+          }, err=>Promise.reject(err))
+      )
+      .subscribe(order => {
+        // console.log(order.queueInfo);
+        // 若 Step 14 中的 "ifShowPassCode" = "Y"，那么多了输入验证码这一步，Post
+        if(order.request.orderInfo.data.ifShowPassCode == "Y") {
+          this.sjGetPassCodeNew.next(order);
+        }else {
+          // Step 17 确认购买，Post
+          this.sjConfirmSingle4Q.next(order);
+        }
+      },err=>console.error(err));
 
-    this.sjGetPassCodeNew.subscribe((orderRequest: object)=> {
+    this.sjGetPassCodeNew.subscribe((order: object)=> {
       // Step 16 乘客买票验证码，Get POST
       this.getPassCodeNew().then(()=> this.checkRandCodeAnsyn())
         .then(x=> {
           console.log(x);
-          this.sjConfirmSingle4Q.next(orderRequest);
+          this.sjConfirmSingle4Q.next(order);
         },error=>console.error(error));
     });
 
-    this.sjConfirmSingle4Q.subscribe((orderRequest: object)=> {
-      this.confirmSingleForQueue(orderRequest.token, orderRequest.passengers.data.normal_passengers, orderRequest.ticketInfo)
+    this.sjConfirmSingle4Q.subscribe((order: object)=> {
+      this.confirmSingleForQueue(order.request.token,
+                                 order.request.passengers.data.normal_passengers,
+                                 order.request.ticketInfo,
+                                 order.planPepoles)
         .then(x=> {
           if(x.status && x.data.submitStatus) {
             // Step 18 查询排队等待时间！
-            this.sjQueryOrderWaitT.next(orderRequest);
+            this.sjQueryOrderWaitT.next(order);
           }else {
             /**
             { validateMessagesShowId: '_validatorMessage',
@@ -318,139 +532,54 @@ export class Account {
             */
             console.log(chalk`{yellow.bold ${x.data.errMsg}}`);
             // 重新开始查询
-            this.sjQueryLfTicket.next(0);
+            sjQueryLfTicket.next(this.nextOrder());
           }
         }, error=> {
           console.error(error);
-          this.sjConfirmSingle4Q.next(orderRequest);
+          this.sjConfirmSingle4Q.next(order);
       });
     });
 
-    this.sjQueryOrderWaitT.subscribe((orderRequest: object)=> {
-      this.queryOrderWaitTime(orderRequest.token)
-        .then(orderQueue=> {
-          if(orderQueue.status) {
-            if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
-              console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
-            }else if(orderQueue.data.waitTime === -2){
-              console.log(orderQueue);
-            }else if(orderQueue.data.waitTime === -3){
-              console.log("Your ticket request has been canceled!");
-            }else if(orderQueue.data.waitTime === -4){
-              console.log("Your ticket request is being processed, please wait a moment!");
-              setTimeout(x=> {
-                this.sjQueryOrderWaitT.next(orderRequest);
-              }, 4000);
-            }else {
-              console.log(chalk`{yellow.bold 排队人数：${orderQueue.data.waitCount}} 预计等待时间：${parseInt(orderQueue.data.waitTime / 1.5)} 分钟`);
-              setTimeout(x=> {
-                this.sjQueryOrderWaitT.next(orderRequest);
-              }, 4000);
-            }
-          }else {
-            console.log(orderQueue);
-            setTimeout(x=> {
-              this.sjQueryOrderWaitT.next(orderRequest);
-            }, 4000);
-          }
-        }, error=> {
-          console.log(chalk.bgBlue(error+" ReCheck Order waiting time"));
-          setTimeout(x=> {
-            this.sjQueryOrderWaitT.next(orderRequest);
-          }, 4000);
-        });
-    });
+    return this.sjLfTicketInit;
   }
 
-  private buildLoginFlow(): void {
-    this.sjLoginInit.subscribe(()=> {
-      this.loginInit()
-        .then(()=>{
-          var tokens = this.checkAuthentication(this.cookiejar._jar.toJSON().cookies);
-          if(tokens.tk) {
-            return this.sjAppToken.next(tokens.tk);
-          }else if(tokens.uamtk) {
-            return this.sjNewAppToken.next();
+  private buildCheckUserFlow(observable: Rx.Observable): Rx.Observable {
+    let sjCheckUser = new Rx.ReplaySubject();
+    let sjLogin = new Rx.Subject();
+    let sjAuthed = new Rx.Subject();
+    observable.subscribe(sjCheckUser);
+
+    // Step 10 验证登录，Post
+    sjCheckUser
+      .mergeMap(() => this.checkUser())
+      .retry(1000)
+      .subscribe((body) => {
+          if(body.data.flag) {
+            // console.log('login success');
+            sjAuthed.next();
+          }else {
+            sjLogin.next();
           }
-          this.sjCaptcha.next();
-        })
-        .catch((error: any)=> {
-          console.error(error);
-        });
-    });
-
-    this.sjCaptcha.subscribe(()=> {
-      this.getCaptcha().then(()=> this.checkCaptcha())
-        .then(()=> {
-          // 校验码成功后进行授权认证
-          console.log(chalk`{green.bold 验证码校验成功}`);
-          this.sjLogin.next();
-        }, (error: any)=> {
-          // 校验失败，重新校验
-          console.log(chalk`{yellow.bold 校验失败，重新校验}`);
-          this.sjCaptcha.next();
-        });
-    });
-
-    this.sjLogin.subscribe(()=> {
-      this.userAuthenticate()
-        .then(()=>{
-          console.log(chalk`{green.bold 登录成功}`);
-          this.sjNewAppToken.next();
-        }, (error: any)=>{
-          /*
-          {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
-          {"result_message":"验证码校验失败","result_code":"5"}
+        // console.log("submit order request check user");
+        }, err=>{
+          console.error("Check user error ");
+          console.error(err);
+          /* TODO add relogin logic
+          { validateMessagesShowId: '_validatorMessage',
+            status: true,
+            httpstatus: 200,
+            data: { flag: false },
+            messages: [],
+            validateMessages: {} }
           */
-          if(typeof error.result_code == "undefined") {
-            this.sjLogin.next();
-          }else {
-            if(error.result_code === 1) {
-              throw error.result_message;
-            }else if(error.result_code === 5) {
-              this.sjCaptcha.next();
-            }else {
-              this.sjCaptcha.next();
-            }
-          }
-        })
-        ;
-    });
-
-    this.sjNewAppToken.subscribe(()=> {
-      this.getNewAppToken()
-        .then((newapptk: string)=> this.sjAppToken.next(newapptk), (error: any)=> {
-          this.sjCaptcha.next();
+          sjLogin.next();
         });
-    });
 
-    this.sjAppToken.subscribe((newapptk: string)=> {
-      this.getAppToken(newapptk).then((x: string) => {
-        this.sjMyPage.next();
-      }, (error: any)=> {
-        console.log(chalk`{yellow.bold 获取Token失败}`);
-        console.log(error);
-        if(error.result_code && error.result_code === 2) {
-          this.sjCaptcha.next();
-        }else {
-          // TODO
-          setTimeout(x=> this.sjAppToken.next(newapptk), 1000);
-        }
-      });
-    });
-
-    this.sjMyPage.subscribe(()=> {
-      this.getMy12306()
-        .then(()=> {
-          console.log(chalk`{green.bold 登录成功}`);
-          this.sjLfTicketInit.next();
-        });
-    });
+    this.buildAuthFlow(sjLogin)
+      .subscribe(()=>sjAuthed.next(),err=>console.error(err));
+    return sjAuthed;
   }
 
-  public submit(): void {
-    this.sjLoginInit.next();
-  }
 
   /**
    * 查询列车余票信息
@@ -465,54 +594,53 @@ export class Account {
   public queryLeftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: Array<string>|null): Promise<Array<any>> {
     if(!trainDate) {
       console.log(chalk`{yellow 请输入乘车日期}`);
-      return;
+      return Promise.reject();
     }
     this.BACK_TRAIN_DATE = trainDate;
+
     if(!fromStationName) {
       console.log(chalk`{yellow 请输入出发站}`);
-      return;
+      return Promise.reject();
     }
     this.FROM_STATION_NAME = fromStationName;
+
     if(!toStationName) {
       console.log(chalk`{yellow 请输入到达站}`);
-      return;
+      return Promise.reject();
     }
     this.TO_STATION_NAME = toStationName;
+
     this.FROM_STATION = this.stations.getStationCode(fromStationName);
     this.TO_STATION = this.stations.getStationCode(toStationName);
 
-    var subjectLeftTicket = new Rx.Subject();
+    return Rx.Observable.of(1)
+      .mergeMap(()=>this.queryLeftTicket(trainDate)
+                      .then((trainsData)=>trainsData,err=> {
+                        console.error(chalk`{yellow.bold ${error}}`);
+                        return Promise.reject(err);
+                      }))
+      .retry(Number.MAX_SAFE_INTEGER)
+      .map(trainsData => trainsData.result)
+      .map(result => {
+        let trains: Array<Array<string>> = [];
 
-    return new Promise((resolve, reject)=> {
-      subjectLeftTicket.subscribe(()=> {
-        this.queryLeftTicket(trainDate).then(trainsData => {
-          let trains: Array<Array<string>> = [];
-
-          trainsData.result.forEach((element: string)=> {
-            let train: Array<string> = element.split("|");
-            train[4] = this.stations.getStationName(train[4]);
-            train[5] = this.stations.getStationName(train[5]);
-            train[6] = this.stations.getStationName(train[6]);
-            train[7] = this.stations.getStationName(train[7]);
-            train[11] = train[11] == "IS_TIME_NOT_BUY" ? "列车停运":train[11];
-            // train[11] = train[11] == "N" ? "无票":train[11];
-            // train[11] = train[11] == "Y" ? "有票":train[11];
-            // 匹配输入的列车名称的正则表达式条件
-            if(!trainNames || trainNames.filter(tn=>train[3].match(new RegExp(tn)) != null).length > 0) {
-              trains.push(train);
-            }
-          });
-
-          resolve(trains);
-        }, error=> {
-          console.error(chalk`{yellow.bold ${error}}`);
-          subjectLeftTicket.next();
-        })
-        .catch(error=>console.error(error));
-      }, err=>console.error(err));
-
-      subjectLeftTicket.next();
-    });
+        result.forEach((element: string)=> {
+          let train: Array<string> = element.split("|");
+          train[4] = this.stations.getStationName(train[4]);
+          train[5] = this.stations.getStationName(train[5]);
+          train[6] = this.stations.getStationName(train[6]);
+          train[7] = this.stations.getStationName(train[7]);
+          train[11] = train[11] == "IS_TIME_NOT_BUY" ? "列车停运":train[11];
+          // train[11] = train[11] == "N" ? "无票":train[11];
+          // train[11] = train[11] == "Y" ? "有票":train[11];
+          // 匹配输入的列车名称的正则表达式条件
+          if(!trainNames || trainNames.filter(tn=>train[3].match(new RegExp(tn)) != null).length > 0) {
+            trains.push(train);
+          }
+        });
+        return trains;
+      })
+      .toPromise();
   }
 
   /**
@@ -558,10 +686,7 @@ export class Account {
   }
 
   private renderTrainListTitle(trains: Array<Array<string>>): Array<Array<string>> {
-    var title = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
-                 '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
-                 '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
-    title = title.map(t=>chalk`{blue ${t}}`);
+    var title = this.TICKET_TITLE.map(t=>chalk`{blue ${t}}`);
 
     trains.forEach((train, index)=> {
       if(index % 30 === 0) {
@@ -648,7 +773,6 @@ export class Account {
         resolve();
       });
     });
-
   }
 
   private questionCaptcha(): Promise<string> {
@@ -951,31 +1075,29 @@ export class Account {
 
     return new Promise((resolve, reject)=> {
       this.request(options, (error, response, body)=> {
-        if(error) throw error;
+        if(error) return reject(error);
 
         if(response.statusCode === 200) {
           body = JSON.parse(body)
-          if(body.data.flag) {
-            return resolve();
-          }
-          return reject(body);
+          return resolve(body);
         }
         reject(response.statusMessage);
       });
     });
   }
 
-  private submitOrderRequest(secretStr: string): Promise<object>  {
+  private submitOrderRequest({trainSecretStr, trainDate, backTrainDate, fromStationName, toStationName}): Promise<object>  {
+
     var url = "https://kyfw.12306.cn/otn/leftTicket/submitOrderRequest";
 
     var data = {
-      "secretStr": querystring.unescape(secretStr)
-      ,"train_date": this.TRAIN_DATE
-      ,"back_train_date": this.BACK_TRAIN_DATE
+      "secretStr": querystring.unescape(trainSecretStr)
+      ,"train_date": trainDate
+      ,"back_train_date": backTrainDate
       ,"tour_flag": "dc"
       ,"purpose_codes": "ADULT"
-      ,"query_from_station_name": this.FROM_STATION_NAME
-      ,"query_to_station_name": this.TO_STATION_NAME
+      ,"query_from_station_name": fromStationName
+      ,"query_to_station_name": toStationName
       ,"undefined":""
     };
 
@@ -996,14 +1118,7 @@ export class Account {
         if(error) throw error;
         if(response.statusCode === 200) {
           body = JSON.parse(body);
-          if(body.status) {
-            return resolve(body);
-          }
-          // console.error(body);
-          if(body.messages[0].indexOf('您还有未处理的订单')>-1) {
-            throw chalk`{red.bold 您还有未处理的订单}`;
-          }
-          return reject(body.messages[0]);
+          return resolve(body);
         }
         reject(response.statusCode);
       });
@@ -1093,10 +1208,10 @@ export class Account {
   ‘一等座’ => ‘M’,
   ‘硬座’ => ‘1’,
    */
-  private getPassengerTickets(passengers): string {
+  private getPassengerTickets(passengers, planPepoles): string {
     var tickets = [];
     passengers.forEach(passenger=> {
-      if(this.PLAN_PEPOLES.includes(passenger.passenger_name)) {
+      if(planPepoles.includes(passenger.passenger_name)) {
         //座位类型,0,票类型(成人/儿童),name,身份类型(身份证/军官证....),身份证,电话号码,保存状态
         var ticket = /*passenger.seat_type*/ "O" +
                 ",0," +
@@ -1113,10 +1228,10 @@ export class Account {
     return tickets.join("_");
   }
 
-  private getOldPassengers(passengers): string {
+  private getOldPassengers(passengers, planPepoles): string {
     var tickets = [];
     passengers.forEach(passenger=> {
-      if(this.PLAN_PEPOLES.includes(passenger.passenger_name)) {
+      if(planPepoles.includes(passenger.passenger_name)) {
         //name,身份类型,身份证,1_
         var ticket =
                 passenger.passenger_name + "," +
@@ -1130,14 +1245,16 @@ export class Account {
     return tickets.join("_")+"_";
   }
 
-  private checkOrderInfo(submitToken, passengers) {
+  private checkOrderInfo(submitToken, passengers, planPepoles) {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/checkOrderInfo";
+
+    var passengerTicketStr = this.getPassengerTickets(passengers, planPepoles);
 
     var data = {
       "cancel_flag": 2
       ,"bed_level_order_num": "000000000000000000000000000000"
-      ,"passengerTicketStr": this.getPassengerTickets(passengers)
-      ,"oldPassengerStr": this.getOldPassengers(passengers)
+      ,"passengerTicketStr": passengerTicketStr
+      ,"oldPassengerStr": this.getOldPassengers(passengers, planPepoles)
       ,"tour_flag": "dc"
       ,"randCode": ""
       ,"whatsSelect":1
@@ -1155,6 +1272,9 @@ export class Account {
     };
 
     return new Promise((resolve: Function, reject: Function)=> {
+      if(!passengerTicketStr) {
+        throw "没有相关联系人";
+      }
       this.request(options, (error, response, body)=> {
         if(error) throw error;
 
@@ -1295,11 +1415,11 @@ export class Account {
     })
   }
 
-  private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm) {
+  private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm, planPepoles) {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/confirmSingleForQueue";
     var data = {
-      "passengerTicketStr": this.getPassengerTickets(passengers)
-      ,"oldPassengerStr": this.getOldPassengers(passengers)
+      "passengerTicketStr": this.getPassengerTickets(passengers, planPepoles)
+      ,"oldPassengerStr": this.getOldPassengers(passengers, planPepoles)
       ,"randCode":""
       ,"purpose_codes": ticketInfoForPassengerForm.purpose_codes
       ,"key_check_isChange": ticketInfoForPassengerForm.key_check_isChange
@@ -1338,7 +1458,6 @@ export class Account {
     })
   }
 
-
   private queryOrderWaitTime(token) {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/queryOrderWaitTime";
     var options = {
@@ -1358,7 +1477,7 @@ export class Account {
 
     return new Promise((resolve, reject)=> {
       this.request(options, (error, response, body)=> {
-        if(error) throw error;
+        if(error) reject(error);
 
         if(response.statusCode === 200) {
           if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
@@ -1431,6 +1550,79 @@ export class Account {
     });
   }
 
+  public myOrderNoComplete() {
+    let sjOrderNoComplete = new Rx.Subject();
+    sjOrderNoComplete.mergeMap(()=> this.queryMyOrderNoComplete())
+      .subscribe((x)=>{
+        /*
+          { validateMessagesShowId: '_validatorMessage',
+            status: true,
+            httpstatus: 200,
+            data: { orderDBList: [ [Object] ], to_page: 'db' },
+            messages: [],
+            validateMessages: {} }
+         */
+         if(!x.data) {
+           console.error(chalk`{yellow 没有未完成订单}`)
+           return;
+         }
+        let tickets = [];
+        if(x.data.orderCacheDTO) {
+          let orderCache = x.data.orderCacheDTO;
+          orderCache.tickets.forEach(ticket=> {
+            tickets.push({
+              "排队号": orderCache.queueName,
+              "等待时间": orderCache.waitTime,
+              "等待人数": orderCache.waitCount,
+              "余票数": orderCache.ticketCount,
+              "乘车日期": orderCache.trainDate.slice(0,10),
+              "车次": orderCache.stationTrainCode,
+              "出发站": orderCache.fromStationName,
+              "到达站": orderCache.toStationName,
+              "座位等级": ticket.seatTypeName,
+              "乘车人": ticket.passengerName
+            });
+          });
+
+        }else if(x.data.orderDBList){
+
+          x.data.orderDBList.forEach(order=> {
+            // console.log(chalk`订单号 {yellow.bold ${order.sequence_no}}`)
+            order.tickets.forEach(ticket=> {
+              tickets.push({
+                "订单号": ticket.sequence_no,
+                // "订票号": ticket.ticket_no,
+                "乘车日期": chalk`{yellow.bold ${ticket.train_date.slice(0,10)}}`,
+                // "下单时间": ticket.reserve_time,
+                "付款截至时间": chalk`{red.bold ${ticket.pay_limit_time}}`,
+                "金额": chalk`{yellow.bold ${ticket.ticket_price/100}}`,
+                "状态": chalk`{yellow.bold ${ticket.ticket_status_name}}`,
+                "乘车人": ticket.passengerDTO.passenger_name,
+                "车次": ticket.stationTrainDTO.station_train_code,
+                "出发站": ticket.stationTrainDTO.from_station_name,
+                "到达站": ticket.stationTrainDTO.to_station_name,
+                "座位": ticket.seat_name,
+                "座位等级": ticket.seat_type_name,
+                "乘车人类型": ticket.ticket_type_name
+              });
+            });
+          });
+        }
+
+        var columns = columnify(tickets, {
+          columnSplitter: '|'
+        });
+
+        console.log(columns);
+      }, err=>console.error('没有未完成订单'));
+
+    let sjL = new Rx.Subject();
+    this.buildLoginFlow(sjL)
+      .subscribe(()=>sjOrderNoComplete.next())
+
+    sjL.next();
+  }
+
   private queryMyOrderNoComplete() {
     let url = "https://kyfw.12306.cn/otn/queryOrder/queryMyOrderNoComplete";
     let options = {
@@ -1450,7 +1642,15 @@ export class Account {
         if(error) throw error;
         if(response.statusCode === 200) {
           if(body.status) {
-            return resolve(body.data.orderDBList)
+            // console.log(body);
+            /**
+              { validateMessagesShowId: '_validatorMessage',
+                status: true,
+                httpstatus: 200,
+                messages: [],
+                validateMessages: {} }
+             */
+            return resolve(body)
           }
           return reject(body.messages);
         }else {

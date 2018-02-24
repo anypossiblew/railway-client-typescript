@@ -38,6 +38,7 @@
     "chalk": "^2.3.0",
     "columnify": "^1.5.4",
     "request": "^2.83.0",
-    "tough-cookie": "^2.3.3"
+    "tough-cookie": "^2.3.3",
+    "winston": "^2.4.0"
   }
 }
