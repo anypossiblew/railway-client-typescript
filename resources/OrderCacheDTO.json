@@ -1,0 +1,40 @@
+{
+	"validateMessagesShowId": "_validatorMessage",
+	"status": true,
+	"httpstatus": 200,
+	"data": {
+		"orderCacheDTO": {
+			"requestId": 6373031354221563000,
+			"userId": 100000000000,
+			"number": 0,
+			"tourFlag": "dc",
+			"requestTime": "2018-02-24 13:11:20",
+			"queueOffset": 17080740164,
+			"queueName": "74_ORDER_X1_1",
+			"trainDate": "2018-03-02 00:00:00",
+			"startTime": "1970-01-01 18:26:00",
+			"stationTrainCode": "G1821",
+			"fromStationCode": "OHH",
+			"fromStationName": "苏州北",
+			"toStationCode": "AOH",
+			"toStationName": "上海虹桥",
+			"status": 1,
+			"modifyTime": "2018-02-24 13:11:20",
+			"tickets": [{
+				"seatTypeName": "二等座",
+				"seatTypeCode": "O",
+				"ticketTypeName": "成人票",
+				"passengerName": "张三",
+				"passengerIdTypeName": "二代身份证"
+			}],
+			"waitTime": 634,
+			"waitCount": 2332,
+			"ticketCount": 1,
+			"startTimeString": "2018-03-02 18:26",
+			"array_passser_name_page": [null]
+		},
+		"to_page": "cache"
+	},
+	"messages": [],
+	"validateMessages": {}
+}

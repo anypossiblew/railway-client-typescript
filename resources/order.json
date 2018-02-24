@@ -1,0 +1,32 @@
+{
+	"sequence_no": "EG60249443",
+	"order_date": "2018-02-24 11:08:47",
+	"ticket_totalnum": 1,
+	"ticket_price_all": 3450,
+	"cancel_flag": "Y",
+	"resign_flag": "4",
+	"return_flag": "N",
+	"print_eticket_flag": "N",
+	"pay_flag": "Y",
+	"pay_resign_flag": "N",
+	"confirm_flag": "N",
+	"tickets": [
+		[object]
+	],
+	"reserve_flag_query": "p",
+	"if_show_resigning_info": "N",
+	"recordCount": "1",
+	"isNeedSendMailAndMsg": "N",
+	"array_passser_name_page": ["张三"],
+	"from_station_name_page": ["苏州北"],
+	"to_station_name_page": ["上海虹桥"],
+	"start_train_date_page": "2018-03-02 18:26",
+	"start_time_page": "18:26",
+	"arrive_time_page": "18:50",
+	"train_code_page": "G1821",
+	"ticket_total_price_page": "34.5",
+	"come_go_traveller_order_page": "N",
+	"canOffLinePay": "N",
+	"if_deliver": "N",
+	"insure_query_no": ""
+}

@@ -1,14 +1,8 @@
 export declare class Account {
     userName: string;
     userPassword: string;
-    TRAIN_DATE: string;
-    BACK_TRAIN_DATE: string;
-    PLAN_TRAINS: Array<string>;
-    PLAN_PEPOLES: Array<string>;
-    FROM_STATION: string;
-    TO_STATION: string;
-    FROM_STATION_NAME: string;
-    TO_STATION_NAME: string;
+    private checkUserTimer;
+    private scptCheckUserTimer;
     private stations;
     private passengers;
     private SYSTEM_BUSSY;
@@ -25,23 +19,16 @@ export declare class Account {
      */
     private isSystemBussy(body);
     setRequest(): void;
-    createOrder(trainDates: Array<string>, backTrainDate: string, fromStationName: string, toStationName: string, planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this;
-    private setOrder(order);
+    private nextOrderNum;
+    private nextOrder();
+    private currentOrder();
+    createOrder(trainDates: Array<string>, backTrainDate: string, [fromStationName, toStationName, passStationName]: [any, any, any], planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this;
+    orderWaitTime(): void;
     cancelOrderQueue(): void;
     submit(): void;
-    private sjLoginInit;
-    private obLoginInit;
-    private sjCaptcha;
-    private obCaptcha;
-    private sjLogin;
-    private obLogin;
-    private sjNewAppToken;
-    private obNewAppToken;
-    private sjAppToken;
-    private obAppToken;
-    private sjMyPage;
+    private buildAuthFlow(subject, sjNewAppToken?, sjAppToken?);
     private build();
-    private buildLoginFlow();
+    private buildLoginFlow(observable);
     private sjLfTicketInit;
     private sjQueryLfTicket;
     private sjSmOReqCheckUser;
@@ -53,7 +40,9 @@ export declare class Account {
     private sjGetPassCodeNew;
     private sjConfirmSingle4Q;
     private sjQueryOrderWaitT;
+    private buildQueryLeftTicketFlow(observable);
     private buildOrderFlow();
+    private buildCheckUserFlow(observable);
     /**
      * 查询列车余票信息
      *
@@ -105,18 +94,19 @@ export declare class Account {
     private leftTicketInit();
     private queryLeftTicket(trainDate);
     private checkUser();
-    private submitOrderRequest(secretStr);
+    private submitOrderRequest({trainSecretStr, trainDate, backTrainDate, fromStationName, toStationName});
     private confirmPassengerInitDc();
     private getPassengers(token);
-    private getPassengerTickets(passengers);
-    private getOldPassengers(passengers);
-    private checkOrderInfo(submitToken, passengers);
+    private getPassengerTickets(passengers, planPepoles);
+    private getOldPassengers(passengers, planPepoles);
+    private checkOrderInfo(submitToken, passengers, planPepoles);
     private getQueueCount(token, orderRequestDTO, ticketInfo);
     private getPassCodeNew();
     private checkRandCodeAnsyn();
-    private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm);
+    private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm, planPepoles);
     private queryOrderWaitTime(token);
     private cancelQueueNoCompleteOrder();
     private initNoComplete();
+    myOrderNoComplete(): void;
     private queryMyOrderNoComplete();
 }
