@@ -26,8 +26,9 @@ export declare class Account {
     orderWaitTime(): void;
     cancelOrderQueue(): void;
     submit(): void;
-    private buildAuthFlow(subject, sjNewAppToken?, sjAppToken?);
+    destroy(): void;
     private build();
+    private buildAuthFlow(subject, sjNewAppToken?, sjAppToken?);
     private buildLoginFlow(observable);
     private sjLfTicketInit;
     private sjQueryLfTicket;
@@ -109,4 +110,19 @@ export declare class Account {
     private initNoComplete();
     myOrderNoComplete(): void;
     private queryMyOrderNoComplete();
+    /**
+    <div class="t-btn">
+  {{if pay_flag=='Y'}}
+         <div class="btn"><a href="#nogo" id="continuePayNoMyComplete" onclick="contiuePayNoCompleteOrder('{{>sequence_no}}','pay')"  class="btn92s">继续支付</a></div>
+         <div class="btn"><a href="#nogo" onclick="cancelMyOrder('{{>sequence_no}}','cancel_order')" id="cancel_button_pay" class="btn92">取消订单</a></div>
+  {{/if}}
+  {{if pay_resign_flag=='Y'}}
+         <div class="btn"><a href="#nogo" id="continuePayNoMyComplete" onclick="contiuePayNoCompleteOrder('{{>sequence_no}}','resign');"  class="btn92s">继续支付</a></div>
+         <div class="btn"><a href="#nogo" onclick="cancelMyOrder('{{>sequence_no}}','cancel_resign')" class="btn92">取消订单</a></div>
+  {{/if}}
+  
+          </div>
+    */
+    private cancelNoCompleteMyOrder(sequenceNo, cancelId?);
+    cancelNoCompleteOrder(sequenceNo: string, cancelId?: string): void;
 }

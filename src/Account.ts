@@ -11,6 +11,7 @@ import process = require('process');
 import Rx = require('@reactivex/rxjs');
 import chalk = require('chalk');
 import columnify = require('columnify');
+import beeper = require('beeper');
 
 export class Account {
   public userName : string;
@@ -137,94 +138,8 @@ export class Account {
     sjL.next();
   }
 
-  private buildAuthFlow(subject: Rx.Subject,
-                        sjNewAppToken: Rx.ReplaySubject = new Rx.ReplaySubject(),
-                        sjAppToken: Rx.ReplaySubject = new Rx.ReplaySubject()) {
-    let sjCaptcha = new Rx.ReplaySubject();
-    let sjLogin = new Rx.ReplaySubject();
-    let sjMyPage = new Rx.Subject();
-
-    subject.subscribe(sjCaptcha);
-
-    sjCaptcha.mergeMap(()=>this.getCaptcha())
-            .mergeMap(()=>this.checkCaptcha().then(()=>{
-              // 校验码成功后进行授权认证
-              console.log(chalk`{green.bold 验证码校验成功}`);
-            },err=> {
-              // 校验失败，重新校验
-              console.log(chalk`{yellow.bold 校验失败，重新校验}`);
-              return Promise.reject(err);
-            }))
-            .retry(Number.MAX_SAFE_INTEGER)
-            .subscribe(()=>sjLogin.next(1), err=>console.error(err));
-
-    sjLogin
-      .mergeMap(()=>
-        this.userAuthenticate()
-            .then(()=> {
-              console.log(chalk`{green.bold 登录成功}`);
-            },err=> {
-              /*
-              {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
-              {"result_message":"验证码校验失败","result_code":"5"}
-              */
-              if(typeof err.result_code == "undefined") {
-                return Promise.reject(err);
-              }else {
-                console.log(chalk`{yellow.bold ${err.result_message}}`);
-                return err;
-                // if(error.result_code === 1) {
-                //   throw error.result_message;
-                // }else if(error.result_code === 5) {
-                //   this.sjCaptcha.next();
-                // }else {
-                //   this.sjCaptcha.next();
-                // }
-              }
-            })
-      )
-      .retry(Number.MAX_SAFE_INTEGER)
-      .subscribe((err)=> {
-        // 登录失败将重新从校验码开始
-        if(err) {
-          sjCaptcha.next(1);
-        }else {
-          sjNewAppToken.next();
-        }
-      });
-      ;
-
-    sjNewAppToken
-      .mergeMap(()=>this.getNewAppToken())
-      .subscribe((newapptk: string)=> {
-        sjAppToken.next(newapptk)
-      },err=> {
-        sjCaptcha.next(1);
-      });
-
-    sjAppToken
-      .mergeMap((newapptk: string)=>this.getAppToken(newapptk)
-        .then((x: string) => , (err: any)=> {
-          console.log(chalk`{yellow.bold 获取Token失败}`);
-          console.log(err);
-          if(err.result_code && err.result_code === 2) {
-            return err;
-          }else {
-            return Promise.reject(err);
-          }
-        }))
-      .retry(Number.MAX_SAFE_INTEGER)
-      .subscribe((err: any) => {
-        if(err) {
-          sjCaptcha.next(1);
-        }else {
-          sjMyPage.next();
-        }
-      }, (error: any)=> {
-        console.log(error);
-      });
-
-    return sjMyPage;
+  public destroy() {
+    this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
   }
 
   private build() {
@@ -235,6 +150,8 @@ export class Account {
             .then(orderQueue=> {
               if(orderQueue.status) {
                 if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
+                  // 0.5秒响一次，响铃30分钟
+                  beeper(60*30*2);
                   return console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
                 }else if(orderQueue.data.waitTime === -2){
                   if(orderQueue.data.msg) {
@@ -264,8 +181,102 @@ export class Account {
       .retry(Number.MAX_SAFE_INTEGER)
       .subscribe((orderRequest: object)=> {
         console.log(chalk`{yellow 结束}`);
-        this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
+        this.destroy();
       },err=>console.log(chalk`{yellow 错误结束 ${err}}`));
+  }
+
+  private buildAuthFlow(subject: Rx.Subject,
+                        sjNewAppToken: Rx.ReplaySubject = new Rx.ReplaySubject(),
+                        sjAppToken: Rx.ReplaySubject = new Rx.ReplaySubject()) {
+    let sjCaptcha = new Rx.ReplaySubject();
+    let sjLogin = new Rx.ReplaySubject();
+    let sjMyPage = new Rx.Subject();
+
+    subject.subscribe(sjCaptcha);
+
+    sjCaptcha.mergeMap(()=>this.getCaptcha())
+            .mergeMap(()=>this.checkCaptcha().then(()=>{
+              // 校验码成功后进行授权认证
+              console.log(chalk`{green.bold 验证码校验成功}`);
+            },err=> {
+              // 校验失败，重新校验
+              console.log(chalk`{yellow.bold 校验失败，重新校验}`);
+              return Promise.reject(err);
+            }))
+            .retry(Number.MAX_SAFE_INTEGER)
+            .subscribe(()=>sjLogin.next(1), err=>console.error(err));
+
+    /**
+     * 如何在 mergeMap + retry 模式中区分需要重试的错误和正常不需要重试的错误，
+     * 如果把不需要重试的错误和正确结果都通过resolve返回则需要什么样的方式进行区别
+     */
+    sjLogin
+      .mergeMap(()=>
+        this.userAuthenticate()
+            .then(()=> {
+              console.log(chalk`{green.bold 登录成功}`);
+              return Promise.resolve();
+            },err=> {
+              /*
+              {"result_message":"密码输入错误。如果输错次数超过4次，用户将被锁定。","result_code":1}
+              {"result_message":"验证码校验失败","result_code":"5"}
+              */
+              if(typeof err.result_code == "undefined") {
+                return Promise.reject(err);
+              }else {
+                console.log(chalk`{yellow.bold ${err.result_message}}`);
+                return err;
+                // if(error.result_code === 1) {
+                //   throw error.result_message;
+                // }else if(error.result_code === 5) {
+                //   this.sjCaptcha.next();
+                // }else {
+                //   this.sjCaptcha.next();
+                // }
+              }
+            })
+      )
+      .retry(Number.MAX_SAFE_INTEGER)
+      .subscribe(err=> {
+        // 登录失败将重新从校验码开始
+        if(err) {
+          sjCaptcha.next(1);
+        }else {
+          sjNewAppToken.next();
+        }
+      });
+
+    sjNewAppToken
+      .mergeMap(()=>this.getNewAppToken())
+      .subscribe((newapptk: string)=> {
+        sjAppToken.next(newapptk)
+      },err=> {
+        sjCaptcha.next(1);
+      });
+
+    sjAppToken
+      .mergeMap((newapptk: string)=>this.getAppToken(newapptk)
+        .then((x: string) => , (err: any)=> {
+          console.log(chalk`{yellow.bold 获取Token失败}`);
+          winston.debug(err);
+          if(err.result_code && err.result_code === 2) {
+            return err;
+          }else {
+            return Promise.reject(err);
+          }
+        }))
+      .retry(Number.MAX_SAFE_INTEGER)
+      .subscribe((err: any) => {
+        if(err) {
+          sjCaptcha.next(1);
+        }else {
+          sjMyPage.next();
+        }
+      }, (error: any)=> {
+        console.log(error);
+      });
+
+    return sjMyPage;
   }
 
   private buildLoginFlow(observable: Rx.Observable): void {
@@ -311,13 +322,6 @@ export class Account {
     observable.subscribe(sjQueryLfTicket);
 
     return sjQueryLfTicket
-      .do(order=>{
-        // this.setOrder(order);
-        if(this.query) {
-          process.stdout.clearLine();
-          process.stdout.cursorTo(0);
-        }
-      })
       .mergeMap(order=>
         this.queryLeftTickets(order.trainDate, order.fromStationName, order.toStationName, order.PLAN_TRAINS)
           .then((trains)=> {
@@ -354,7 +358,7 @@ export class Account {
           return order.seatClasses.some(seat => {
             var seatNum = this.TICKET_TITLE.indexOf(seat);
             if(train[seatNum] == "有" || train[seatNum] > 0) {
-              console.log(order.trainDate+"/"+train[3]+"/"+train[seatNum]);
+              winston.debug(order.trainDate+"/"+train[3]+"/"+seat+"/"+train[seatNum]);
               if(order.PLAN_TRAINS.includes(train[3])) {
                 planTrains.push(train);
                 return true;
@@ -383,6 +387,12 @@ export class Account {
     });
 
     this.buildQueryLeftTicketFlow(sjQueryLfTicket)
+      .do(()=> {
+        if(this.query) {
+          process.stdout.clearLine();
+          process.stdout.cursorTo(0);
+        }
+      })
       .subscribe(order=> {
         if(order.availableTrains.length > 0) {
           this.query = false;
@@ -390,8 +400,9 @@ export class Account {
           order.trainSecretStr = order.availableTrains[0][0];
           sjSmOReqCheckUser.next(order);
         }else {
-          // console.log(chalk`{yellow 没有可购买余票 ${this.TRAIN_DATE[i]}}`);
-          process.stdout.write(chalk`没有可购买余票 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} ${order.passStationName?'途经'+order.passStationName+' ':''}{yellow ${order.trainDate}}`);
+          process.stdout.write(chalk`没有可购买余票 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} ${order.passStationName?'到'+order.passStationName+' ':''}{yellow ${order.trainDate}}`);
+          // process.stdout.write(".......");
+
           setTimeout(()=> {
             sjQueryLfTicket.next(this.nextOrder());
           }, 1500);
@@ -406,7 +417,7 @@ export class Account {
 
     // Step 11 预提交订单，Post
     this.sjSmOrderReq.subscribe(order=> {
-      console.log("submit order request");
+      winston.debug("submit order request");
       this.submitOrderRequest(order)
         .then((body)=> {
           if(body.status) {
@@ -415,7 +426,8 @@ export class Account {
           }else {
             // 您还有未处理的订单
             // 该车次暂不办理业务
-            console.error(chalk`{red.bold ${body.messages[0]}}`);
+            winston.error(chalk`{red.bold ${body.messages[0]}}`);
+            this.destroy();
           }
         }, error=> {
           winston.error("SubmitOrderRequest error " + error);
@@ -501,7 +513,10 @@ export class Account {
           // Step 17 确认购买，Post
           this.sjConfirmSingle4Q.next(order);
         }
-      },err=>console.error(err));
+      },err=>{
+        winston.error(chalk`{red.bold ${JSON.stringify(err)}}`);
+        this.destroy();
+      });
 
     this.sjGetPassCodeNew.subscribe((order: object)=> {
       // Step 16 乘客买票验证码，Get POST
@@ -615,11 +630,12 @@ export class Account {
 
     return Rx.Observable.of(1)
       .mergeMap(()=>this.queryLeftTicket(trainDate)
-                      .then((trainsData)=>trainsData,err=> {
-                        console.error(chalk`{yellow.bold ${error}}`);
+                      .then((trainsData)=>trainsData, err=> {
+                        process.stdout.write(".");
                         return Promise.reject(err);
                       }))
-      .retry(Number.MAX_SAFE_INTEGER)
+      // .retry(Number.MAX_SAFE_INTEGER)
+      .retryWhen((errors)=>errors.delay(1500))
       .map(trainsData => trainsData.result)
       .map(result => {
         let trains: Array<Array<string>> = [];
@@ -834,23 +850,22 @@ export class Account {
 
         this.request(options, (error, response, body) => {
           if(error) {
-            console.error(error);
+            return reject(error);
           }
           if(response.statusCode === 200) {
             body = JSON.parse(body);
-            // console.log(body.result_message);
+            winston.debug(body.result_message);
             if(body.result_code == 4) {
               resolve();
             }
             reject();
           }else {
-            console.log('error: '+ response.statusCode);
-            console.log(response.text);
+            winston.debug('error: '+ response.statusCode);
             reject();
           }
         });
       }, error=>{
-        console.error(error);
+        winston.error(error);
       });
     });
   }
@@ -913,7 +928,7 @@ export class Account {
         if(response.statusCode === 200) {
           // console.log(body);
           body = JSON.parse(body);
-          console.log(body.result_message);
+          winston.debug(body);
           if(body.result_code == 0) {
             resolve(body.newapptk);
           }else {
@@ -983,9 +998,8 @@ export class Account {
         if(error) throw error;
 
         if(response.statusCode === 200) {
-          // console.log(body);
           body = JSON.parse(body);
-          console.log(body.result_message);
+          winston.debug(body.result_message);
           if(body.result_code == 0) {
             resolve(body.apptk);
           }else {
@@ -1030,8 +1044,6 @@ export class Account {
         if(error) {
           return reject(error.toString());
         }
-        // console.log(response.statusCode);
-        // console.log(body);
         if(response.statusCode === 200) {
           if(!body) {
             return reject(response.statusCode);
@@ -1049,7 +1061,7 @@ export class Account {
           }
         }else {
           console.log(response.statusCode);
-          reject();
+          reject(response.statusCode);
         }
       });
     });
@@ -1660,4 +1672,62 @@ export class Account {
     });
   }
 
+  /**
+  <div class="t-btn">
+{{if pay_flag=='Y'}}
+       <div class="btn"><a href="#nogo" id="continuePayNoMyComplete" onclick="contiuePayNoCompleteOrder('{{>sequence_no}}','pay')"  class="btn92s">继续支付</a></div>
+       <div class="btn"><a href="#nogo" onclick="cancelMyOrder('{{>sequence_no}}','cancel_order')" id="cancel_button_pay" class="btn92">取消订单</a></div>
+{{/if}}
+{{if pay_resign_flag=='Y'}}
+       <div class="btn"><a href="#nogo" id="continuePayNoMyComplete" onclick="contiuePayNoCompleteOrder('{{>sequence_no}}','resign');"  class="btn92s">继续支付</a></div>
+	   <div class="btn"><a href="#nogo" onclick="cancelMyOrder('{{>sequence_no}}','cancel_resign')" class="btn92">取消订单</a></div>
+{{/if}}
+
+        </div>
+  */
+  private cancelNoCompleteMyOrder(sequenceNo: string, cancelId: string = 'cancel_order') {
+    let url = "https://kyfw.12306.cn/otn/queryOrder/cancelNoCompleteMyOrder";
+    let options = {
+      url: url
+      ,method: "POST"
+      ,headers: Object.assign(Object.assign({}, this.headers), {
+        "Referer": "https://kyfw.12306.cn/otn/queryOrder/initNoComplete"
+      })
+      ,form: {
+        "sequence_no": sequenceNo,
+  			"cancel_flag": cancelId,
+        "_json_att":""
+      }
+      ,json: true
+    };
+
+    return new Promise((resolve, reject)=> {
+      this.request(options, (error, response, body)=> {
+        if(error) throw error;
+        if(response.statusCode === 200) {
+          return resolve(body);
+        }else {
+          reject(response.statusCode);
+        }
+      });
+    });
+  }
+
+  public cancelNoCompleteOrder(sequenceNo: string, cancelId: string = 'cancel_order') {
+    let sjCancelOrder = new Rx.Subject();
+    this.buildLoginFlow(sjCancelOrder)
+      .subscribe(()=>{
+        this.cancelNoCompleteMyOrder(sequenceNo, cancelId)
+          .then(body=> {
+            // {"validateMessagesShowId":"_validatorMessage","status":true,"httpstatus":200,"data":{},"messages":[],"validateMessages":{}}
+            if (body.data.existError == "Y") {
+  						winston.error(chalk`{red ${body.data.errorMsg}}`);
+  					} else {
+  						winston.warn(chalk`{yellow 订单 ${sequenceNo} 已取消}`);
+  					}
+          },err=>winston.error(chalk`{red ${JSON.stringify(err)}}`));
+      });
+
+    sjCancelOrder.next();
+  }
 }
