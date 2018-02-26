@@ -22,9 +22,11 @@
   "devDependencies": {
     "@types/chalk": "^2.2.0",
     "@types/es6-shim": "^0.31.35",
+    "@types/minimist": "^1.2.0",
     "@types/node": "^9.4.0",
     "@types/request": "^2.47.0",
     "@types/tough-cookie": "^2.3.2",
+    "@types/winston": "^2.3.8",
     "gulp": "^3.9.1",
     "gulp-sourcemaps": "^2.6.4",
     "gulp-typescript": "^3.2.4",
@@ -38,6 +40,7 @@
     "beeper": "^1.1.1",
     "chalk": "^2.3.0",
     "columnify": "^1.5.4",
+    "minimist": "^1.2.0",
     "request": "^2.83.0",
     "tough-cookie": "^2.3.3",
     "winston": "^2.4.0"

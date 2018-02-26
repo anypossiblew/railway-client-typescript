@@ -2,12 +2,12 @@ export declare class Account {
     userName: string;
     userPassword: string;
     private checkUserTimer;
-    private scptCheckUserTimer;
+    private scptCheckUserTimer?;
     private stations;
-    private passengers;
+    private passengers?;
     private SYSTEM_BUSSY;
     private SYSTEM_MOVED;
-    private request;
+    private request?;
     private cookiejar;
     headers: object;
     private TICKET_TITLE;
@@ -30,6 +30,10 @@ export declare class Account {
     private build();
     private buildAuthFlow(subject, sjNewAppToken?, sjAppToken?);
     private buildLoginFlow(observable);
+    /**
+     * 数组多关键字段排序算法，字段默认为递减排序，如果字段前面带有+符号则为递增排序
+     */
+    private fieldSorter(fields);
     private sjLfTicketInit;
     private sjQueryLfTicket;
     private sjSmOReqCheckUser;
@@ -54,29 +58,28 @@ export declare class Account {
      *
      * @return Promise
      */
-    queryLeftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: Array<string> | null): Promise<Array<any>>;
+    queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string> | null): Promise<Array<any>>;
     /**
      * 查询列车余票信息
      *
      * @param trainDate 乘车日期
      * @param fromStationName 出发站
+     * @param toStationName 到达站
      * @param passStationName 途经站
-     * @param toStationName 到达站
-     *
-     * @return void
-     */
-    passStationTickets(trainDate: string, fromStationName: string, passStationName: string, toStationName: string, trainNames: string): void;
-    /**
-     * 查询列车余票信息
-     *
-     * @param trainDate 乘车日期
-     * @param fromStationName 出发站
-     * @param toStationName 到达站
      * @param trainNames 列车
+     * @param f 车次过滤条件
+     * @param t 时间过滤条件
      *
      * @return void
      */
-    leftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: string): void;
+    leftTickets([trainDate, fromStationName, toStationName, passStationName]: [any, any, any, any], {filter, f, time, t, orderby, o}: {
+        filter: any;
+        f: any;
+        time: any;
+        t: any;
+        orderby: any;
+        o: any;
+    }): void;
     private renderTrainListTitle(trains);
     private renderLeftTickets(trains);
     myOrderNoCompleteReport(): void;
@@ -93,7 +96,7 @@ export declare class Account {
      */
     private getAppToken(newapptk);
     private leftTicketInit();
-    private queryLeftTicket(trainDate);
+    private queryLeftTicket({trainDate, fromStation, toStation});
     private checkUser();
     private submitOrderRequest({trainSecretStr, trainDate, backTrainDate, fromStationName, toStationName});
     private confirmPassengerInitDc();

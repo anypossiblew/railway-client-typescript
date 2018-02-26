@@ -9,23 +9,41 @@ import fs = require('fs');
 import readline = require('readline');
 import process = require('process');
 import Rx = require('@reactivex/rxjs');
+// import { Observable, ObservableInput } from '@reactivex/rxjs';
 import chalk = require('chalk');
 import columnify = require('columnify');
 import beeper = require('beeper');
 
+interface Order extends Rx.ObservableInput {
+  trainDate: string
+  ,backTrainDate: string
+  ,fromStationName: string
+  ,toStationName: string
+  ,passStationName?: string
+  ,planTrains: Array<string>
+  ,planPepoles: Array<string>
+  ,planTimes?: Array<string>
+  ,fromStation: string
+  ,toStation: string
+  ,passStation?: string
+  ,seatClasses: Array<string>
+  ,trains?: Array<Array<string>>
+
+}
+
 export class Account {
   public userName : string;
   public userPassword : string;
-  private checkUserTimer = Rx.Observable.timer(0, 1000*60*20);
-  private scptCheckUserTimer: Rx.Subscription;
+  private checkUserTimer = Rx.Observable.timer(1000*60*10, 1000*60*10); // 十分钟之后开始，每十分钟检查一次
+  private scptCheckUserTimer?: Rx.Subscription;
 
   private stations: Station = new Station();
-  private passengers: object;
+  private passengers?: object;
 
   private SYSTEM_BUSSY = "System is bussy";
   private SYSTEM_MOVED = "Moved Temporarily";
 
-  private request: request.RequestAPI<any, any, any>;
+  private request?: request.RequestAPI<any, any, any>;
   private cookiejar: any;
   public headers: object = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
@@ -35,13 +53,13 @@ export class Account {
     ,"Referer": "https://kyfw.12306.cn/otn/passport?redirect=/otn/"
   };
 
-  private TICKET_TITLE = ['', '', '', '车次', '起始', '终点', '出发', '到达', '出发', '到达', '历时', '', '',
+  private TICKET_TITLE = ['', '', '', '车次', '起始', '终点', '出发站', '到达站', '出发时', '到达时', '历时', '', '',
                '日期', '', '', '', '', '', '', '', '高级软卧', '', '软卧', '软座', '特等座', '无座',
                '', '硬卧', '硬座', '二等座', '一等座', '商务座'];
 
   private query = false;
 
-  private orders: Array<object> = [];
+  private orders: Array<Order> = [];
 
   constructor(name: string, userPassword: string) {
     this.userName = name;
@@ -49,7 +67,6 @@ export class Account {
 
     this.setRequest();
     this.build();
-
   }
 
   /**
@@ -69,9 +86,9 @@ export class Account {
     this.request = request.defaults({jar: this.cookiejar});
   }
 
-  private nextOrderNum: Number = 0;
+  private nextOrderNum: number = 0;
   private nextOrder() {
-    this.nextOrderNum = (this.nextOrderNum+1)%this.orders.length;
+    this.nextOrderNum = (this.nextOrderNum + 1)%this.orders.length;
     return this.orders[this.nextOrderNum];
   }
 
@@ -83,16 +100,23 @@ export class Account {
                      [fromStationName, toStationName, passStationName],
                      planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this {
     trainDates.forEach(trainDate=> {
+      if(!new Date(trainDate).toJSON()) {
+        throw chalk`{red 乘车日期${trainDate}格式不正确，格式应该是yyyy-MM-dd}`;
+      }
+      if(new Date(trainDate).toJSON().slice(0,10) < new Date().toJSON().slice(0,10)) {
+        throw chalk`{red 乘车日期应该为今天或以后}`;
+      }
       this.orders.push({
         trainDate: trainDate
         ,backTrainDate: backTrainDate
-        ,fromStationName: fromStationName;
-        ,toStationName: toStationName;
-        ,passStationName: passStationName,
-        ,PLAN_TRAINS: planTrains;
-        ,planPepoles: planPepoles;
-        ,FROM_STATION: this.stations.getStationCode(fromStationName);
-        ,TO_STATION: this.stations.getStationCode(toStationName);
+        ,fromStationName: fromStationName
+        ,toStationName: toStationName
+        ,passStationName: passStationName
+        ,planTrains: planTrains
+        ,planPepoles: planPepoles
+        ,fromStation: this.stations.getStationCode(fromStationName)
+        ,toStation: this.stations.getStationCode(toStationName)
+        ,passStation: this.stations.getStationCode(passStationName)
         ,seatClasses: seatClasses
       })
     });
@@ -168,17 +192,14 @@ export class Account {
               }else {
                 console.log(orderQueue);
               }
-              return new Promise((resolve, reject)=> {
-                setTimeout(x=> {
-                  reject();
-                }, 4000);
-              });
+              return Promise.reject();
             },err=> {
               console.error(err);
               return Promise.reject(err);
             })
       )
-      .retry(Number.MAX_SAFE_INTEGER)
+      // .retry(Number.MAX_SAFE_INTEGER)
+      .retryWhen((errors)=>errors.delay(4000))
       .subscribe((orderRequest: object)=> {
         console.log(chalk`{yellow 结束}`);
         this.destroy();
@@ -250,13 +271,13 @@ export class Account {
       .mergeMap(()=>this.getNewAppToken())
       .subscribe((newapptk: string)=> {
         sjAppToken.next(newapptk)
-      },err=> {
+      },(err: any) => {
         sjCaptcha.next(1);
       });
 
     sjAppToken
       .mergeMap((newapptk: string)=>this.getAppToken(newapptk)
-        .then((x: string) => , (err: any)=> {
+        .then((x: string) => '', (err: any)=> {
           console.log(chalk`{yellow.bold 获取Token失败}`);
           winston.debug(err);
           if(err.result_code && err.result_code === 2) {
@@ -279,29 +300,45 @@ export class Account {
     return sjMyPage;
   }
 
-  private buildLoginFlow(observable: Rx.Observable): void {
+  private buildLoginFlow(observable: Rx.Observable<any>): Rx.Observable<any> {
     let sjLoginInit = new Rx.ReplaySubject();
     let sjCaptcha = new Rx.Subject();
-    let sjNewAppToken = new Rx.ReplaySubject();
-    let sjAppToken = new Rx.ReplaySubject();
+    let sjNewAppToken = new Rx.ReplaySubject<any>();
+    let sjAppToken = new Rx.ReplaySubject<string>();
 
     observable.subscribe(sjLoginInit);
 
     // 登录初始化
     sjLoginInit
       .mergeMap(order=>this.loginInit())
-      .retry(Number.MAX_SAFE_INTEGER)
+      .retry(1000)
       .map(order => this.checkAuthentication(this.cookiejar._jar.toJSON().cookies))
       .subscribe(tokens=> {
         if(tokens.tk) {
           return sjAppToken.next(tokens.tk);
         }else if(tokens.uamtk) {
-          return sjNewAppToken.next();
+          return sjNewAppToken.next('');
         }
         sjCaptcha.next(1);
       });
 
     return this.buildAuthFlow(sjCaptcha, sjNewAppToken, sjAppToken);
+  }
+
+  /**
+   * 数组多关键字段排序算法，字段默认为递减排序，如果字段前面带有+符号则为递增排序
+   */
+  private fieldSorter(fields: Array<string>) {
+    return (a:any, b:any) => fields.map((o:string) => {
+              let dir = -1;
+              if (o[0] === '+') {
+                dir = 1;
+                o = o.substring(1);
+              }else if(o[0] === '-') {
+                o = o.substring(1);
+              }
+              return a[o] > b[o] ? dir : a[o] < b[o] ? -(dir) : 0;
+          }).reduce((p, n) => p ? p : n, 0);
   }
 
   private sjLfTicketInit      = new Rx.Subject();
@@ -316,23 +353,25 @@ export class Account {
   private sjConfirmSingle4Q   = new Rx.Subject();
   private sjQueryOrderWaitT   = new Rx.ReplaySubject();
 
-  private buildQueryLeftTicketFlow(observable: Rx.Observable): Rx.Observable {
-    let sjQueryLfTicket = new Rx.ReplaySubject();
+  private buildQueryLeftTicketFlow(observable: Rx.Observable<Order>): Rx.Observable<{}> {
+    let sjQueryLfTicket = new Rx.ReplaySubject<Order>();
 
     observable.subscribe(sjQueryLfTicket);
 
     return sjQueryLfTicket
-      .mergeMap(order=>
-        this.queryLeftTickets(order.trainDate, order.fromStationName, order.toStationName, order.PLAN_TRAINS)
+      // 获取余票信息
+      .mergeMap((order: Order):Rx.ObservableInput<Order> =>
+        this.queryLeftTickets(order.trainDate, order.fromStation, order.toStation, order.planTrains)
           .then((trains)=> {
             order.trains = trains;
             return order;
           },err=>console.error(err))
       )
-      .mergeMap(order=>{
-        if(order.passStationName) {
+      // 获取途经站车次信息
+      .mergeMap((order: Order):Rx.ObservableInput<Order> => {
+        if(order.passStation) {
           if(!order.fromToPassTrains) {
-            return this.queryLeftTickets(order.trainDate, order.fromStationName, order.passStationName, order.PLAN_TRAINS)
+            return this.queryLeftTickets(order.trainDate, order.fromStation, order.passStation, order.planTrains)
               .then(passTrains=> {
                 order.fromToPassTrains = passTrains.map(train => train[3]);
                 return order;
@@ -344,22 +383,42 @@ export class Account {
           return Promise.resolve(order);
         }
       })
-      .map(order=> {
+      // 按途经站车次过滤
+      .map((order: Order):Rx.ObservableInput<Order> => {
         if(order.fromToPassTrains) {
           order.trains = order.trains.filter(train => order.fromToPassTrains.includes(train[3]));
         }
         return order;
       })
-      .map(order=> {
+      // 按时间范围过滤
+      .map((order: Order) => {
+        if(order.planTimes) {
+          let trains = order.trains||[];
+          order.trains = trains.filter(train=> {
+            return (order.planTimes[0]?order.planTimes[0]<=train[8]:true)&&(order.planTimes[1]?order.planTimes[1]>=train[8]:true);
+          });
+        }
+
+        return order;
+      })
+      // 根据字段排序
+      .map((order: Order)=> {
+        if(order.planOrderBy) {
+          order.trains = order.trains.sort(this.fieldSorter(order.planOrderBy));
+        }
+        return order;
+      })
+      // 计算可购买车次信息
+      .map((order: Order):Rx.ObservableInput<Order> => {
         let trains = order.trains||[];
 
-        var planTrains = [], that = this;
+        let planTrains: Array<string> = [], that = this;
         trains.some(train => {
           return order.seatClasses.some(seat => {
             var seatNum = this.TICKET_TITLE.indexOf(seat);
             if(train[seatNum] == "有" || train[seatNum] > 0) {
               winston.debug(order.trainDate+"/"+train[3]+"/"+seat+"/"+train[seatNum]);
-              if(order.PLAN_TRAINS.includes(train[3])) {
+              if(order.planTrains.includes(train[3])) {
                 planTrains.push(train);
                 return true;
               }
@@ -481,14 +540,14 @@ export class Account {
                 // console.log(orderInfo);
                 order.request.orderInfo = orderInfo;
                 return order;
-              },err => {
+              }, err => {
                 if(err == "没有相关联系人") {
                   return err;
                 }else {
                   return Promise.reject(err);
                 }
               }))
-      .retry(100)
+      .retry(1000)
       .mergeMap((order)=> {
         if(typeof order == "string") {
           return Promise.reject(order);
@@ -606,30 +665,29 @@ export class Account {
    *
    * @return Promise
    */
-  public queryLeftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: Array<string>|null): Promise<Array<any>> {
+  public queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string>|null): Promise<Array<any>> {
     if(!trainDate) {
       console.log(chalk`{yellow 请输入乘车日期}`);
       return Promise.reject();
     }
-    this.BACK_TRAIN_DATE = trainDate;
+    // this.BACK_TRAIN_DATE = trainDate;
 
-    if(!fromStationName) {
+    if(!fromStation) {
       console.log(chalk`{yellow 请输入出发站}`);
       return Promise.reject();
     }
-    this.FROM_STATION_NAME = fromStationName;
+    // this.FROM_STATION_NAME = fromStationName;
 
-    if(!toStationName) {
+    if(!toStation) {
       console.log(chalk`{yellow 请输入到达站}`);
       return Promise.reject();
     }
-    this.TO_STATION_NAME = toStationName;
-
-    this.FROM_STATION = this.stations.getStationCode(fromStationName);
-    this.TO_STATION = this.stations.getStationCode(toStationName);
+    // this.TO_STATION_NAME = toStationName;
 
     return Rx.Observable.of(1)
-      .mergeMap(()=>this.queryLeftTicket(trainDate)
+      .mergeMap(()=>this.queryLeftTicket({trainDate: trainDate,
+                                          fromStation: fromStation,
+                                          toStation: toStation})
                       .then((trainsData)=>trainsData, err=> {
                         process.stdout.write(".");
                         return Promise.reject(err);
@@ -664,41 +722,56 @@ export class Account {
    *
    * @param trainDate 乘车日期
    * @param fromStationName 出发站
+   * @param toStationName 到达站
    * @param passStationName 途经站
-   * @param toStationName 到达站
-   *
-   * @return void
-   */
-  public passStationTickets(trainDate: string, fromStationName: string, passStationName: string, toStationName: string, trainNames: string) {
-    let planTrainNames: Array<string>|null = (trainNames ? trainNames.split(','):null);
-    this.queryLeftTickets(trainDate, fromStationName, toStationName, planTrainNames)
-      .then(trains=> {
-        trains = trains.map(train => train[3]);
-        this.queryLeftTickets(trainDate, fromStationName, passStationName, planTrainNames)
-          .then(passTrains=> {
-            let result = passTrains.filter(train => trains.includes(train[3]));
-            result = this.renderTrainListTitle(result);
-            this.renderLeftTickets(result);
-          });
-      });
-  }
-
-  /**
-   * 查询列车余票信息
-   *
-   * @param trainDate 乘车日期
-   * @param fromStationName 出发站
-   * @param toStationName 到达站
    * @param trainNames 列车
+   * @param f 车次过滤条件
+   * @param t 时间过滤条件
    *
    * @return void
    */
-  public leftTickets(trainDate: string, fromStationName: string, toStationName: string, trainNames: string) {
-    this.queryLeftTickets(trainDate, fromStationName, toStationName, (trainNames ? trainNames.split(','):null))
-      .then(trains=> {
-        trains = this.renderTrainListTitle(trains);
+  public leftTickets([trainDate, fromStationName, toStationName, passStationName], {filter,f,time,t,orderby,o}) {
+    let fromStation: string = this.stations.getStationCode(fromStationName);
+    let toStation: string = this.stations.getStationCode(toStationName);
+    let passStation: string = this.stations.getStationCode(passStationName);
+
+    let planTrains: Array<string>|null =
+      typeof f == "string" ? f.split(','):(typeof filter == "string" ? filter.split(','):null);
+    let planTimes: Array<string>|null =
+      typeof t == "string" ? t.split(','):(typeof time == "string" ? time.split(','):null);
+    let planOrderBy: Array<string>|null =
+      typeof o == "string" ? o.split(','):(typeof orderby == "string" ? orderby.split(','):null);
+
+    if(planOrderBy) {
+      planOrderBy = planOrderBy.map((fieldName:string) => {
+        if(fieldName[0] === '-' || fieldName[0] === '+') {
+          return fieldName[0]+this.TICKET_TITLE.indexOf(fieldName.substring(1));
+        }
+        return this.TICKET_TITLE.indexOf(fieldName);
+      });
+    }
+
+    const sjQueryLeftTickets = new Rx.Subject<Order>();
+
+    this.buildQueryLeftTicketFlow(sjQueryLeftTickets)
+      .subscribe((order: Order) => {
+        let trains = this.renderTrainListTitle(order.trains);
+        if(trains.length === 0) {
+          return console.log(chalk`{yellow 没有符合条件的车次}`)
+        }
         this.renderLeftTickets(trains);
       });
+
+    sjQueryLeftTickets.next({
+      trainDate: trainDate
+      ,fromStation: fromStation
+      ,toStation: toStation
+      ,passStation: passStation
+      ,planTrains: planTrains
+      ,planTimes: planTimes
+      ,planOrderBy: planOrderBy
+      ,seatClasses: []
+    });
   }
 
   private renderTrainListTitle(trains: Array<Array<string>>): Array<Array<string>> {
@@ -1027,11 +1100,11 @@ export class Account {
     });
   }
 
-  private queryLeftTicket(trainDate): Promise<void> {
+  private queryLeftTicket({trainDate, fromStation, toStation}): Promise<void> {
     var query = {
       "leftTicketDTO.train_date": trainDate
-      ,"leftTicketDTO.from_station": this.FROM_STATION
-      ,"leftTicketDTO.to_station": this.TO_STATION
+      ,"leftTicketDTO.from_station": fromStation
+      ,"leftTicketDTO.to_station": toStation
       ,"purpose_codes": "ADULT"
     }
 
@@ -1487,7 +1560,7 @@ export class Account {
       ,json: true
     };
 
-    return new Promise((resolve, reject)=> {
+    return new Promise((resolve: Function, reject: Function)=> {
       this.request(options, (error, response, body)=> {
         if(error) reject(error);
 
