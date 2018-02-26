@@ -101,27 +101,27 @@ const Rx = require("@reactivex/rxjs");
 
 
 
-const sj1 = new Rx.ReplaySubject();
-
-sj1
-// .do((i)=> {
-//   throw 'error'+i
-// })
-.mergeMap(()=>new Promise((resolve, reject)=>{
-  console.log('step 1');
-  // reject('step1 error');
-  resolve('step1 resolve')
-}))
-// .retry(1)
-.retryWhen((errors)=>errors.delay(2000)) //Rx.Observable.of([1,2]).delay(3000))
-.mergeMap(()=>new Promise((resolve, reject)=>{
-  console.log('step 2');
-  reject('step2 error');
-}))
-.retry(2)
-.subscribe(()=>console.log('done'),err=>console.error(err));
-
-sj1.next(1);
+// const sj1 = new Rx.ReplaySubject();
+//
+// sj1
+// // .do((i)=> {
+// //   throw 'error'+i
+// // })
+// .mergeMap(()=>new Promise((resolve, reject)=>{
+//   console.log('step 1');
+//   // reject('step1 error');
+//   resolve('step1 resolve')
+// }))
+// // .retry(1)
+// .retryWhen((errors)=>errors.delay(2000)) //Rx.Observable.of([1,2]).delay(3000))
+// .mergeMap(()=>new Promise((resolve, reject)=>{
+//   console.log('step 2');
+//   reject('step2 error');
+// }))
+// .retry(2)
+// .subscribe(()=>console.log('done'),err=>console.error(err));
+//
+// sj1.next(1);
 // sj1.next(2);
 
 // promise reject 不会终止 subject
@@ -158,3 +158,15 @@ sj1.next(1);
 // process.stdout.write('123');
 // process.stdout.clearLine();
 // process.stdout.cursorTo(0);
+
+
+var exec = require('child_process').exec,
+    child;
+
+child = exec('captcha.BMP',
+  function (error, stdout, stderr) {
+    console.log('Image opened');
+    if (error !== null) {
+      console.log('exec error: ' + error);
+    }
+});

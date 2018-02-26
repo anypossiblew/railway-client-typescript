@@ -13,6 +13,7 @@ import Rx = require('@reactivex/rxjs');
 import chalk = require('chalk');
 import columnify = require('columnify');
 import beeper = require('beeper');
+import child_process = require('child_process');
 
 interface Order extends Rx.ObservableInput {
   trainDate: string
@@ -870,6 +871,8 @@ export class Account {
       output: process.stdout
     });
     return new Promise<string>((resolve: Function, reject: Function)=> {
+      let child = child_process.exec('captcha.BMP',()=>{});
+
       rl.question(chalk`{red.bold 请输入验证码}:`, (positionStr) => {
         rl.close();
 
