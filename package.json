@@ -27,13 +27,16 @@
     "@types/request": "^2.47.0",
     "@types/tough-cookie": "^2.3.2",
     "@types/winston": "^2.3.8",
+    "awesome-typescript-loader": "^3.5.0",
     "gulp": "^3.9.1",
     "gulp-sourcemaps": "^2.6.4",
     "gulp-typescript": "^3.2.4",
     "merge2": "^1.2.1",
     "nodemon": "^1.14.12",
     "ts-node": "^4.1.0",
-    "typescript": "^2.7.1"
+    "typescript": "^2.7.1",
+    "webpack": "^4.0.0",
+    "webpack-cli": "^2.0.9"
   },
   "dependencies": {
     "@reactivex/rxjs": "^5.5.6",
