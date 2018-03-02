@@ -8,14 +8,16 @@ import querystring = require('querystring');
 import fs = require('fs');
 import readline = require('readline');
 import process = require('process');
-import Rx = require('@reactivex/rxjs');
-// import { Observable, ObservableInput } from '@reactivex/rxjs';
+// import Rx = require('@reactivex/rxjs');
+import Rx from 'rxjs/Rx';
 import chalk = require('chalk');
 import columnify = require('columnify');
 import beeper = require('beeper');
 import child_process = require('child_process');
 
-interface Order extends Rx.ObservableInput {
+import { Observable } from 'rxjs/Observable';
+
+interface Order {
   trainDate: string
   ,backTrainDate: string
   ,fromStationName: string
@@ -29,7 +31,6 @@ interface Order extends Rx.ObservableInput {
   ,passStation?: string
   ,seatClasses: Array<string>
   ,trains?: Array<Array<string>>
-
 }
 
 export class Account {
@@ -363,10 +364,10 @@ export class Account {
       // 获取余票信息
       .mergeMap((order: Order):Rx.ObservableInput<Order> =>
         this.queryLeftTickets(order.trainDate, order.fromStation, order.toStation, order.planTrains)
-          .then((trains)=> {
+          .map((trains)=> {
             order.trains = trains;
             return order;
-          },err=>console.error(err))
+          })
       )
       // 获取途经站车次信息
       .mergeMap((order: Order):Rx.ObservableInput<Order> => {
@@ -666,7 +667,7 @@ export class Account {
    *
    * @return Promise
    */
-  public queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string>|null): Promise<Array<any>> {
+  public queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string>|null): Observable<Array<any>> {
     if(!trainDate) {
       console.log(chalk`{yellow 请输入乘车日期}`);
       return Promise.reject();
@@ -689,12 +690,9 @@ export class Account {
       .mergeMap(()=>this.queryLeftTicket({trainDate: trainDate,
                                           fromStation: fromStation,
                                           toStation: toStation})
-                      .then((trainsData)=>trainsData, err=> {
-                        process.stdout.write(".");
-                        return Promise.reject(err);
-                      }))
+                                        )
       // .retry(Number.MAX_SAFE_INTEGER)
-      .retryWhen((errors)=>errors.delay(1500))
+      .retryWhen((errors)=>errors.do(()=>process.stdout.write(".")).delay(1500))
       .map(trainsData => trainsData.result)
       .map(result => {
         let trains: Array<Array<string>> = [];
@@ -714,8 +712,7 @@ export class Account {
           }
         });
         return trains;
-      })
-      .toPromise();
+      });
   }
 
   /**
@@ -1103,7 +1100,7 @@ export class Account {
     });
   }
 
-  private queryLeftTicket({trainDate, fromStation, toStation}): Promise<void> {
+  private queryLeftTicket({trainDate, fromStation, toStation}): Observable<any> {
     var query = {
       "leftTicketDTO.train_date": trainDate
       ,"leftTicketDTO.from_station": fromStation
@@ -1115,29 +1112,27 @@ export class Account {
 
     var url = "https://kyfw.12306.cn/otn/leftTicket/queryZ?"+param;
 
-    return new Promise((resolve, reject)=> {
+    return Observable.create((observer: Observer<any>)=> {
       this.request(url, (error, response, body)=> {
-        if(error) {
-          return reject(error.toString());
-        }
+        if(error) return observer.error(error.toString());
+
         if(response.statusCode === 200) {
           if(!body) {
-            return reject(response.statusCode);
+            return observer.error("系统返回无数据");
           }
           if(body.indexOf("请您重试一下") > 0) {
-            reject("系统繁忙!");
+            return observer.error("系统繁忙!");
           }else {
             try {
               var data = JSON.parse(body).data;
             }catch(err) {
-              console.log(body);
-              reject(err);
+              return observer.error(err);
             }
-            resolve(data);
+            // Resolved
+          observer.next(data);
           }
         }else {
-          console.log(response.statusCode);
-          reject(response.statusCode);
+          return observer.error(response.statusCode);
         }
       });
     });

@@ -3,11 +3,26 @@ import fs = require('fs');
 import crypto = require('crypto');
 import tough = require('tough-cookie');
 
-export class FileCookieStore extends tough.MemoryCookieStore {
-  public idx: object;
-  public filePath: string;
+export interface Option {
+  encrypt: boolean;
+  algorithm?: string;
+  password?: string;
+}
 
-  constructor(filePath: string, option: {encrypt: boolean, algorithm: string, password: string}) {
+interface IdxData {
+  [p: string]: any;
+}
+
+export interface Callback {
+  (param?: any|void): any|void
+}
+
+export class FileCookieStore extends tough.MemoryCookieStore {
+  private idx: IdxData;
+  private filePath: string;
+  private option: Option;
+
+  constructor(filePath: string, option: Option) {
     super();
 
     this.idx = {}; // idx is memory cache
@@ -18,14 +33,15 @@ export class FileCookieStore extends tough.MemoryCookieStore {
         option.algorithm = option.algorithm || 'aes-256-cbc';
         option.password = option.password || 'tough-cookie-store';
     }
+    this.option = option;
     var self = this;
-    this.loadFromFile(this.filePath, option, function (dataJson: any) {
+    this.loadFromFile(this.filePath, option, (dataJson: any)=> {
         if (dataJson)
             self.idx = dataJson;
     });
   }
 
-  public putCookie(cookie: tough.Cookie, cb: object): void {
+  public putCookie(cookie: tough.Cookie, cb?: Callback): void {
       if (!this.idx[cookie.domain]) {
           this.idx[cookie.domain] = {};
       }
@@ -34,21 +50,17 @@ export class FileCookieStore extends tough.MemoryCookieStore {
       }
       this.idx[cookie.domain][cookie.path][cookie.key] = cookie;
 
-      this.saveToFile(this.filePath, this.idx, this.option, function () {
-          cb(null);
-      });
+      this.saveToFile(this.filePath, this.idx, this.option, cb);
   }
 
-  public removeCookie(domain, path, key, cb): void {
+  public removeCookie(domain: string, path: string, key: string, cb?: Callback): void {
       if (this.idx[domain] && this.idx[domain][path] && this.idx[domain][path][key]) {
           delete this.idx[domain][path][key];
       }
-      this.saveToFile(this.filePath, this.idx, this.option, function () {
-          cb(null);
-      });
+      this.saveToFile(this.filePath, this.idx, this.option, cb);
   }
 
-  public removeCookies(domain, path, cb) {
+  public removeCookies(domain: string, path: string, cb?: Callback) {
       if (this.idx[domain]) {
           if (path) {
               delete this.idx[domain][path];
@@ -56,12 +68,10 @@ export class FileCookieStore extends tough.MemoryCookieStore {
               delete this.idx[domain];
           }
       }
-      this.saveToFile(this.filePath, this.idx, this.option, function () {
-          return cb(null);
-      });
+      this.saveToFile(this.filePath, this.idx, this.option, cb);
   }
 
-  public getCookie(domain, path, key) {
+  public getCookie(domain: string, path: string, key: string) {
       if (!this.idx[domain]) {
           return undefined;
       }
@@ -79,16 +89,16 @@ export class FileCookieStore extends tough.MemoryCookieStore {
       return this.isEmptyObject(this.idx);
   }
 
-  private isEmptyObject(obj) {
+  private isEmptyObject(obj: object) {
       for (var key in obj) {
-          if (hasOwnProperty.call(obj, key)) {
+          if (obj.hasOwnProperty.call(obj, key)) {
               return false;
           }
       }
       return true;
   }
 
-  private saveToFile(filePath, data, option, cb): void {
+  private saveToFile(filePath: string, data: IdxData, option: Option, cb?: Callback): void {
       var dataJson = JSON.stringify(data);
       if (option.encrypt) {
           var cipher = crypto.createCipher(option.algorithm, option.password);
@@ -99,7 +109,7 @@ export class FileCookieStore extends tough.MemoryCookieStore {
       if (typeof cb === 'function') cb();
   }
 
-  private loadFromFile(filePath: string, option: object, cb: object): void {
+  private loadFromFile(filePath: string, option: Option, cb: Callback): void {
       var data = fs.readFileSync(filePath, {encoding: 'utf8', flag: 'a+'});
       if (option.encrypt && data) {
           var decipher = crypto.createDecipher(option.algorithm, option.password);
