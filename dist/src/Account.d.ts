@@ -1,3 +1,4 @@
+import { Observable } from 'rxjs/Observable';
 export declare class Account {
     userName: string;
     userPassword: string;
@@ -28,8 +29,11 @@ export declare class Account {
     submit(): void;
     destroy(): void;
     private build();
-    private buildAuthFlow(subject, sjNewAppToken?, sjAppToken?);
-    private buildLoginFlow(observable);
+    private observableCheckCaptcha();
+    private observableLogin();
+    private observableNewAppToken();
+    private observableAppToken(newapptk);
+    private observableLoginInit();
     /**
      * 数组多关键字段排序算法，字段默认为递减排序，如果字段前面带有+符号则为递增排序
      */
@@ -45,9 +49,12 @@ export declare class Account {
     private sjGetPassCodeNew;
     private sjConfirmSingle4Q;
     private sjQueryOrderWaitT;
-    private buildQueryLeftTicketFlow(observable);
+    private buildQueryLeftTicketFlow(order);
+    private recursiveQueryLeftTicket();
+    private observableGetPassengers(order);
+    private observableGetPassCodeNew(order);
     private buildOrderFlow();
-    private buildCheckUserFlow(observable);
+    private observableCheckUser();
     /**
      * 查询列车余票信息
      *
@@ -58,7 +65,7 @@ export declare class Account {
      *
      * @return Promise
      */
-    queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string> | null): Promise<Array<any>>;
+    queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string> | null): Observable<Array<any>>;
     /**
      * 查询列车余票信息
      *
@@ -83,18 +90,15 @@ export declare class Account {
     private renderTrainListTitle(trains);
     private renderLeftTickets(trains);
     myOrderNoCompleteReport(): void;
-    loginInit(): Promise<void>;
+    loginInit(): Observable<void>;
     private getCaptcha();
     private questionCaptcha();
     private checkCaptcha();
     private userAuthenticate();
     private getNewAppToken();
+    private getAppToken(newapptk);
     private getMy12306();
     private checkAuthentication(cookies);
-    /**
-     *
-     */
-    private getAppToken(newapptk);
     private leftTicketInit();
     private queryLeftTicket({trainDate, fromStation, toStation});
     private checkUser();

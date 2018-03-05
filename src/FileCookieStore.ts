@@ -101,7 +101,7 @@ export class FileCookieStore extends tough.MemoryCookieStore {
   private saveToFile(filePath: string, data: IdxData, option: Option, cb?: Callback): void {
       var dataJson = JSON.stringify(data);
       if (option.encrypt) {
-          var cipher = crypto.createCipher(option.algorithm, option.password);
+          var cipher = crypto.createCipher(option.algorithm||'', option.password||'');
           dataJson = cipher.update(dataJson, 'utf8', 'hex');
           dataJson += cipher.final('hex');
       }
@@ -112,7 +112,7 @@ export class FileCookieStore extends tough.MemoryCookieStore {
   private loadFromFile(filePath: string, option: Option, cb: Callback): void {
       var data = fs.readFileSync(filePath, {encoding: 'utf8', flag: 'a+'});
       if (option.encrypt && data) {
-          var decipher = crypto.createDecipher(option.algorithm, option.password);
+          var decipher = crypto.createDecipher(option.algorithm||'', option.password||'');
           data = decipher.update(data, 'hex', 'utf8');
           data += decipher.final('utf8');
       }
