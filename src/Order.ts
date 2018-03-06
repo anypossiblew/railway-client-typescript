@@ -1,5 +1,11 @@
 import {Station} from './Station';
 
+export interface OrderSubmitRequest {
+  token: string;
+  ticketInfo: object;
+  orderRequest: object;
+}
+
 export interface IOrder {
   trainDate: string
   ,backTrainDate: string
@@ -14,7 +20,7 @@ export interface IOrder {
   ,passStation?: string
   ,seatClasses: ReadonlyArray<string>
   trains?: Array<Array<string>>;
-  request: any;
+  request?: any;
 }
 
 export class Order implements IOrder {

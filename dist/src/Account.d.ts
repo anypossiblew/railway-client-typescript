@@ -1,4 +1,5 @@
 import { Observable } from 'rxjs/Observable';
+import 'rxjs/add/observable/bindCallback';
 export declare class Account {
     userName: string;
     userPassword: string;
@@ -8,7 +9,8 @@ export declare class Account {
     private passengers?;
     private SYSTEM_BUSSY;
     private SYSTEM_MOVED;
-    private request?;
+    private rawRequest;
+    private request;
     private cookiejar;
     headers: object;
     private TICKET_TITLE;
@@ -24,11 +26,10 @@ export declare class Account {
     private nextOrder();
     private currentOrder();
     createOrder(trainDates: Array<string>, backTrainDate: string, [fromStationName, toStationName, passStationName]: [any, any, any], planTrains: Array<string>, planPepoles: Array<string>, seatClasses: Array<string>): this;
+    submit(): void;
     orderWaitTime(): void;
     cancelOrderQueue(): void;
-    submit(): void;
     destroy(): void;
-    private build();
     private observableCheckCaptcha();
     private observableLogin();
     private observableNewAppToken();
@@ -38,23 +39,13 @@ export declare class Account {
      * 数组多关键字段排序算法，字段默认为递减排序，如果字段前面带有+符号则为递增排序
      */
     private fieldSorter(fields);
-    private sjLfTicketInit;
-    private sjQueryLfTicket;
-    private sjSmOReqCheckUser;
-    private sjSmOrderReq;
-    private sjCPasInitDc;
-    private sjGetPassengers;
-    private sjCheckOrderInfo;
-    private sjGetQueueCount;
-    private sjGetPassCodeNew;
-    private sjConfirmSingle4Q;
-    private sjQueryOrderWaitT;
     private buildQueryLeftTicketFlow(order);
     private recursiveQueryLeftTicket();
     private observableGetPassengers(order);
     private observableGetPassCodeNew(order);
     private buildOrderFlow();
     private observableCheckUser();
+    private obsQueryOrderWaitT(order);
     /**
      * 查询列车余票信息
      *
@@ -97,7 +88,6 @@ export declare class Account {
     private userAuthenticate();
     private getNewAppToken();
     private getAppToken(newapptk);
-    private getMy12306();
     private checkAuthentication(cookies);
     private leftTicketInit();
     private queryLeftTicket({trainDate, fromStation, toStation});

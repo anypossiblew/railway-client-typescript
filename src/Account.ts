@@ -11,12 +11,13 @@ import process = require('process');
 import Rx from 'rxjs/Rx';
 import { Observable } from 'rxjs/Observable';
 import { Observer } from 'rxjs/Observer';
+import 'rxjs/add/observable/bindCallback';
 import chalk = require('chalk');
 import columnify = require('columnify');
 import beeper = require('beeper');
 import child_process = require('child_process');
 
-import {IOrder, Order} from './Order';
+import {OrderSubmitRequest, IOrder, Order} from './Order';
 
 interface OrderSubmitRequest {
   token: string;
@@ -36,7 +37,8 @@ export class Account {
   private SYSTEM_BUSSY = "System is bussy";
   private SYSTEM_MOVED = "Moved Temporarily";
 
-  private request?: request.RequestAPI<any, any, any>;
+  private rawRequest: (options:any|undefined|null, cb:any)=>any;
+  private request: (options?:any|undefined|null)=>Observable<any>;
   private cookiejar: any;
   public headers: object = {
     "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8"
@@ -59,7 +61,12 @@ export class Account {
     this.userPassword = userPassword;
 
     this.setRequest();
-    this.build();
+    this.rawRequest = request.defaults({jar: this.cookiejar});
+    this.request = Observable.bindCallback<Array<any>>(this.rawRequest, (error, response, body)=> {
+      if(error) throw error;
+      if(response.statusCode !== 200) throw ['http error', response.statusCode, response.statusMessage].join(' ');
+      return body;
+    });
   }
 
   /**
@@ -76,7 +83,8 @@ export class Account {
 
     this.cookiejar = request.jar(fileStore);
 
-    this.request = request.defaults({jar: this.cookiejar});
+    // this.request = request.defaults({jar: this.cookiejar});
+
   }
 
   private nextOrderNum: number = 0;
@@ -108,11 +116,37 @@ export class Account {
     return this;
   }
 
-  public orderWaitTime() {
-    let sjOrderWaitTime = new Rx.Subject();
+  public submit(): void {
     this.observableLoginInit()
-      .subscribe(()=>this.sjQueryOrderWaitT.next());
-    sjOrderWaitTime.next();
+      .subscribe(()=>{
+        this.buildOrderFlow();
+
+        this.scptCheckUserTimer =
+          this.checkUserTimer.subscribe((i)=> {
+            this.observableCheckUser()
+              .subscribe(()=>winston.debug("Check user done"));
+          });
+      });
+  }
+
+  public orderWaitTime() {
+    this.observableLoginInit()
+      .subscribe(()=>{
+        this.obsQueryOrderWaitT(new Order())
+          .subscribe((orderRequest: object)=> {
+              console.log(chalk`{yellow 结束}`);
+              this.destroy();
+            }
+            ,err=>console.log(chalk`{yellow 错误结束 ${err}}`)
+            ,()=>{
+              this.destroy();
+            }
+          );
+      }
+      ,err=>console.log(chalk`{yellow 错误结束 ${err}}`)
+      ,()=>{
+        this.destroy();
+      });
   }
 
   public cancelOrderQueue() {
@@ -126,61 +160,8 @@ export class Account {
       }, error=> console.error(error));
   }
 
-  public submit(): void {
-    let sjCheckUser = new Rx.Subject();
-    this.observableLoginInit()
-      .subscribe(()=>{
-        this.buildOrderFlow();
-        this.scptCheckUserTimer =
-          this.checkUserTimer.subscribe((i)=> {
-            this.observableCheckUser()
-              .subscribe(()=>winston.debug("Check user done"));
-          });
-      });
-  }
-
   public destroy() {
     this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
-  }
-
-  private build() {
-
-    this.sjQueryOrderWaitT
-        .mergeMap((orderRequest: object)=>
-          this.queryOrderWaitTime(orderRequest&&(orderRequest.token||""))
-            .then(orderQueue=> {
-              if(orderQueue.status) {
-                if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
-                  // 0.5秒响一次，响铃30分钟
-                  beeper(60*30*2);
-                  return console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
-                }else if(orderQueue.data.waitTime === -2){
-                  if(orderQueue.data.msg) {
-                    return console.log(chalk`{yellow.bold ${orderQueue.data.msg}}`);
-                  }
-                  return console.log(orderQueue);
-                }else if(orderQueue.data.waitTime === -3){
-                  return console.log("Your ticket request has been canceled!");
-                }else if(orderQueue.data.waitTime === -4){
-                  console.log("Your ticket request is being processed, please wait a moment!");
-                }else {
-                  console.log(chalk`{yellow.bold 排队人数：${orderQueue.data.waitCount}} 预计等待时间：${parseInt(orderQueue.data.waitTime / 1.5)} 分钟`);
-                }
-              }else {
-                console.log(orderQueue);
-              }
-              return Promise.reject();
-            },err=> {
-              console.error(err);
-              return Promise.reject(err);
-            })
-      )
-      // .retry(Number.MAX_SAFE_INTEGER)
-      .retryWhen((errors)=>errors.delay(4000))
-      .subscribe((orderRequest: object)=> {
-        console.log(chalk`{yellow 结束}`);
-        this.destroy();
-      },err=>console.log(chalk`{yellow 错误结束 ${err}}`));
   }
 
   private observableCheckCaptcha(): Observable<void> {
@@ -226,7 +207,7 @@ export class Account {
     return Observable.of(1)
       .mergeMap(()=>this.getNewAppToken())
       .retryWhen(error$=>
-        error$.do(err=>console.error(err))
+        error$.do(err=>winston.error(err))
           .mergeMap(err=> {
             return this.observableLogin();
           })
@@ -241,7 +222,7 @@ export class Account {
       })
       .mergeMap(newapptk=>this.getAppToken(newapptk))
       .retryWhen(error$=>
-        error$.do(err=>console.error(err))
+        error$.do(err=>winston.error(err))
           .mergeMap(err=> {
             console.log(chalk`{yellow.bold 获取Token失败}`);
             winston.debug(err);
@@ -290,23 +271,11 @@ export class Account {
           }).reduce((p, n) => p ? p : n, 0);
   }
 
-  private sjLfTicketInit      = new Rx.Subject();
-  private sjQueryLfTicket     = new Rx.Subject();
-  private sjSmOReqCheckUser   = new Rx.Subject<string>();
-  private sjSmOrderReq        = new Rx.Subject<string>();
-  private sjCPasInitDc        = new Rx.Subject<string>();
-  private sjGetPassengers     = new Rx.Subject<object>();
-  private sjCheckOrderInfo    = new Rx.ReplaySubject<object>();
-  private sjGetQueueCount     = new Rx.Subject();
-  private sjGetPassCodeNew    = new Rx.Subject();
-  private sjConfirmSingle4Q   = new Rx.Subject();
-  private sjQueryOrderWaitT   = new Rx.ReplaySubject();
-
   private buildQueryLeftTicketFlow(order: Order): Observable<Order> {
 
     return Observable.of(order)
       // 获取余票信息
-      .mergeMap((order: Order):Rx.ObservableInput<Order> =>
+      .mergeMap((order: Order)=>
         this.queryLeftTickets(order.trainDate, order.fromStation, order.toStation, order.planTrains)
           .map((trains)=> {
             order.trains = trains;
@@ -314,7 +283,7 @@ export class Account {
           })
       )
       // 获取途经站车次信息
-      .mergeMap((order: Order):Rx.ObservableInput<Order> => {
+      .mergeMap((order: Order)=> {
         if(order.passStation) {
           if(!order.fromToPassTrains) {
             return this.queryLeftTickets(order.trainDate, order.fromStation, order.passStation, order.planTrains)
@@ -330,7 +299,7 @@ export class Account {
         }
       })
       // 按途经站车次过滤
-      .map((order: Order):Rx.ObservableInput<Order> => {
+      .map((order: Order) => {
         if(order.fromToPassTrains) {
           order.trains = order.trains.filter(train => order.fromToPassTrains.includes(train[3]));
         }
@@ -355,7 +324,7 @@ export class Account {
         return order;
       })
       // 计算可购买车次信息
-      .map((order: Order):Rx.ObservableInput<Order> => {
+      .map((order: Order)=> {
         let trains = order.trains||[];
 
         let planTrains: Array<string> = [], that = this;
@@ -449,19 +418,23 @@ export class Account {
           order.request.passengers = this.passengers;
           return Observable.of(order);
         }else {
-          return this.observableGetPassengers(order)
+          return this.getPassengers(order.request.token)
+            .retryWhen(error$=>
+                error$.do((err)=>winston.error(chalk`{red.bold ${err}}`))
+                .delay(500)
+            )
             .map(passengers=> {
               this.passengers = passengers;
               order.request.passengers = passengers;
               return order;
-            })
+            });
         }
       })
       // Step 14 购票人确定，Post
       .switchMap((order: Order)=>
         this.checkOrderInfo(order.request.token, order.request.passengers.data.normal_passengers, order.planPepoles)
           .retryWhen(error$=>
-            error$.mergeMap(err=> {
+            error$.do(err=>winston.error(err)).mergeMap(err=> {
               if(err == "没有相关联系人") {
                 return Observable.throw(err);
               }else {
@@ -478,6 +451,7 @@ export class Account {
       .switchMap((order: Order)=>
         this.getQueueCount(order.request.token, order.request.orderRequest, order.request.ticketInfo)
           .map(body=>{
+            winston.debug(body);
             order.request.queueInfo = body;
             return order;
           })
@@ -490,7 +464,7 @@ export class Account {
           return Observable.of(order);
         }
       })
-      .switchMap(order=> {
+      .switchMap(order=>
         this.confirmSingleForQueue(order.request.token,
                                    order.request.passengers.data.normal_passengers,
                                    order.request.ticketInfo,
@@ -513,8 +487,8 @@ export class Account {
                 throw 'retry';
               }
             })
-      })
-      .retryWhen(error$=>error$.do(err=>console.error(chalk`{yellow.bold ${err}}`))
+      )
+      .retryWhen(error$=>error$.do(err=>winston.error(chalk`{yellow.bold ${err}}`))
           .mergeMap((err)=> {
             if(err == 'retry') {
               return Observable.timer(500);
@@ -545,12 +519,18 @@ export class Account {
   private buildOrderFlow() {
 
     // 初始化查询火车余票页面
-    Observable.of(1)
+    return Observable.of(1)
       .mergeMap(()=>this.leftTicketInit())
       .switchMap(()=>this.recursiveQueryLeftTicket())
       // Step 18 查询排队等待时间！
       .subscribe(
-        (order)=> this.sjQueryOrderWaitT.next(order),
+        (order: Order)=> {
+          this.obsQueryOrderWaitT(order)
+            .subscribe((orderRequest: object)=> {
+                console.log(chalk`{yellow 结束}`);
+                this.destroy();
+              },err=>winston.error(chalk`{yellow 错误结束 ${err}}`));
+        },
         err=>{
           winston.error(chalk`{red.bold ${JSON.stringify(err)}}`);
           this.destroy();
@@ -572,6 +552,58 @@ export class Account {
       });
   }
 
+  private obsQueryOrderWaitT(order: Order): Observable<void> {
+    return Observable.of(order)
+        .mergeMap((order: Order)=> this.queryOrderWaitTime(""))
+        .map(orderQueue=> {
+          winston.debug(JSON.stringify(orderQueue));
+          /**
+          {
+            "validateMessagesShowId": "_validatorMessage",
+            "status": true,
+            "httpstatus": 200,
+            "data": {
+              "queryOrderWaitTimeStatus": true,
+              "count": 0,
+              "waitTime": 2444,
+              "requestId": 6376727285634797000,
+              "waitCount": 2000,
+              "tourFlag": "dc",
+              "orderId": null
+            },
+            "messages": [],
+            "validateMessages": {}
+          }
+          */
+          if(orderQueue.status) {
+            if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
+              // 0.5秒响一次，响铃30分钟
+              beeper(60*30*2);
+              return console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
+            }else if(orderQueue.data.waitTime === -2){
+              if(orderQueue.data.msg) {
+                return console.log(chalk`{yellow.bold ${orderQueue.data.msg}}`);
+              }
+              return console.log(orderQueue);
+            }else if(orderQueue.data.waitTime === -3){
+              return console.log("Your ticket request has been canceled!");
+            }else if(orderQueue.data.waitTime === -4){
+              console.log("Your ticket request is being processed, please wait a moment!");
+            }else {
+              console.log(chalk`{yellow.bold 排队人数：${orderQueue.data.waitCount}} 预计等待时间：${parseInt(orderQueue.data.waitTime / 1.5)} 分钟`);
+            }
+          }else {
+            console.log(orderQueue);
+          }
+          throw 'retry';
+        })
+        .retryWhen((errors)=>errors.do((err)=>{
+          if(err!='retry') {
+            winston.error(err)
+          }
+        }).delay(4000))
+        ;
+  }
 
   /**
    * 查询列车余票信息
@@ -608,7 +640,7 @@ export class Account {
                                           toStation: toStation})
                                         )
       // .retry(Number.MAX_SAFE_INTEGER)
-      .retryWhen((errors)=>errors.do(()=>process.stdout.write(".")).delay(1500))
+      .retryWhen((errors$)=>errors$.do(()=>process.stdout.write(".")).delay(1500))
       .map(trainsData => trainsData.result)
       .map(result => {
         let trains: Array<Array<string>> = [];
@@ -706,24 +738,20 @@ export class Account {
   }
 
   public myOrderNoCompleteReport() {
-    var subjectOrderNoComplete = new Rx.Subject();
-
-    subjectOrderNoComplete.subscribe(()=> {
-      this.initNoComplete().then(()=> {
-        this.queryMyOrderNoComplete().then(x=> {
-            var columns = columnify(x, {
-              columnSplitter: ' | '
-            });
-
-            console.log(columns);
-          }, error=> {
-            console.error(error);
-            setTimeout(()=> subjectOrderNoComplete.next(), 1000)
+    this.initNoComplete()
+      .mergeMap(()=>
+        this.queryMyOrderNoComplete()
+          .retryWhen(error$=>error$.delay(500))
+      )
+      .subscribe(x=> {
+          var columns = columnify(x, {
+            columnSplitter: ' | '
           });
-      }, error=> console.error(error));
-    });
 
-    subjectOrderNoComplete.next();
+          console.log(columns);
+        }, error=> {
+          winston.error(error);
+        })
   }
 
   public loginInit(): Observable<void> {
@@ -734,16 +762,7 @@ export class Account {
       headers: this.headers
     };
 
-    return Observable.create((observer: Observer<void>)=> {
-      this.request(options, (error, response, body) => {
-        if(error) return observer.error(error.toString());
-
-        if(response.statusCode === 200) {
-          return observer.next();
-        }
-        observer.error(response.statusCode);
-      });
-    });
+    return this.request(options);
   }
 
   private getCaptcha(): Observable<void> {
@@ -763,7 +782,7 @@ export class Account {
     };
 
     return Observable.create((observer: Observer<void>)=> {
-      this.request(options, (error, response, body) => {
+      this.rawRequest(options, (error: any, response: any, body: string) => {
         if(error) return observer.error(error);
       }).pipe(fs.createWriteStream("captcha.BMP")).on('close', function(){
         observer.next();
@@ -771,12 +790,12 @@ export class Account {
     });
   }
 
-  private questionCaptcha(): Promise<string> {
+  private questionCaptcha(): Observable<string> {
     const rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout
     });
-    return new Promise<string>((resolve: Function, reject: Function)=> {
+    return Observable.create((observer: Observer<string>)=> {
       let child = child_process.exec('captcha.BMP',()=>{});
 
       rl.question(chalk`{red.bold 请输入验证码}:`, (positionStr) => {
@@ -785,29 +804,30 @@ export class Account {
         if(typeof positionStr == "string") {
           let positions: Array<string> = [];
           positionStr.split(',').forEach(el=>positions=positions.concat(el.split(' ')));
-          resolve(positions.map((position: string)=> {
-            switch(position) {
-              case "1":
-                return "40,45";
-              case "2":
-                return "110,45";
-              case "3":
-                return "180,45";
-              case "4":
-                return "250,45";
-              case "5":
-                return "40,110";
-              case "6":
-                return "110,110";
-              case "7":
-                return "180,110";
-              case "8":
-                return "250,110";
-            }
-          }).join(','));
-        }else {
-          reject("输入格式错误");
-        }
+          observer.next(positions.map((position: string)=> {
+              switch(position) {
+                case "1":
+                  return "40,45";
+                case "2":
+                  return "110,45";
+                case "3":
+                  return "180,45";
+                case "4":
+                  return "250,45";
+                case "5":
+                  return "40,110";
+                case "6":
+                  return "110,110";
+                case "7":
+                  return "180,110";
+                case "8":
+                  return "250,110";
+              }
+            }).join(','));
+            observer.complete();
+          }else {
+            observer.error("输入格式错误");
+          }
       });
     });
   }
@@ -815,8 +835,8 @@ export class Account {
   private checkCaptcha(): Observable<void> {
     var url = "https://kyfw.12306.cn/passport/captcha/captcha-check";
 
-    return Observable.create((observer: Observer<void>)=> {
-      this.questionCaptcha().then(positions=> {
+    return this.questionCaptcha()
+      .mergeMap(positions=>{
         var data = {
             "answer": positions,
             "login_site": "E",
@@ -829,25 +849,15 @@ export class Account {
           ,method: 'POST'
           ,form: data
         };
-
-        this.request(options, (error, response, body) => {
-          if(error) return observer.error(error);
-          if(response.statusCode === 200) {
-            body = JSON.parse(body);
-            winston.debug(body.result_message);
+        return this.request(options)
+          .map(body=>JSON.parse(body))
+          .map(body=> {
             if(body.result_code == 4) {
-              return observer.next();
+              return body;
             }
-            observer.error();
-          }else {
-            winston.debug('error: '+ response.statusCode);
-            observer.error();
-          }
-        });
-      }, err=>{
-        winston.error(err);
+            throw body.result_message;
+          });
       });
-    });
   }
 
   private userAuthenticate(): Observable<string> {
@@ -867,24 +877,17 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<string>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          body = JSON.parse(body);
-          if(body.result_code == 2) {
-            return observer.error(body.result_message);
-          }else if(body.result_code != 0) {
-            return observer.error(body);
-          }else {
-            return observer.next(body.uamtk);
-          }
+    return this.request(options)
+      .map(body=>JSON.parse(body))
+      .map(body=> {
+        if(body.result_code == 2) {
+          throw body.result_message;
+        }else if(body.result_code != 0) {
+          throw body;
+        }else {
+          return body.uamtk;
         }
-
-        return observer.error(response.statusCode);
       });
-    });
   }
 
   private getNewAppToken(): Observable<string> {
@@ -899,23 +902,16 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<string>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          body = JSON.parse(body);
-          winston.debug(body);
-          if(body.result_code == 0) {
-            return observer.next(body.newapptk);
-          }else {
-            return observer.error(body);
-          }
+    return this.request(options)
+      .map(body=>JSON.parse(body))
+      .map(body=> {
+        winston.debug(body);
+        if(body.result_code == 0) {
+          return body.newapptk;
         }else {
-          return observer.error(response.statusCode)
+          throw body;
         }
       });
-    });
   }
 
   private getAppToken(newapptk: string): Observable<string> {
@@ -934,40 +930,33 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<string>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          body = JSON.parse(body);
-          winston.debug(body.result_message);
-          if(body.result_code == 0) {
-            return observer.next(body.apptk);
-          }else {
-            return observer.error(body);
-          }
+    return this.request(options)
+      .map(body=>JSON.parse(body))
+      .map(body=> {
+        winston.debug(body.result_message);
+        if(body.result_code == 0) {
+          return body.apptk;
+        }else {
+          throw body;
         }
-
-        return observer.error(response.statusCode)
       });
-    });
   }
 
-  private getMy12306(): Promise {
-    return new Promise((resolve, reject)=> {
-      this.request({
-        url: "https://kyfw.12306.cn/otn/index/initMy12306"
-       ,headers: this.headers
-       ,method: "GET"},
-       (error, response, body)=> {
-        if(response.statusCode === 200) {
-          console.log("Got my 12306");
-          return resolve();
-        }
-        reject();
-      });
-    });
-  }
+  // private getMy12306(): Promise {
+  //   return new Promise((resolve, reject)=> {
+  //     this.request({
+  //       url: "https://kyfw.12306.cn/otn/index/initMy12306"
+  //      ,headers: this.headers
+  //      ,method: "GET"},
+  //      (error, response, body)=> {
+  //       if(response.statusCode === 200) {
+  //         console.log("Got my 12306");
+  //         return resolve();
+  //       }
+  //       reject();
+  //     });
+  //   });
+  // }
 
   private checkAuthentication(cookies: object) {
     var uamtk = "", tk = "";
@@ -989,17 +978,7 @@ export class Account {
   private leftTicketInit(): Observable<void> {
     var url = "https://kyfw.12306.cn/otn/leftTicket/init";
 
-    return Observable.create((observer: Observer<void>)=> {
-      this.request(url, (error, response, body)=> {
-        if(error) return observer.error(error.toString());
-
-        if(response.statusCode === 200) {
-          observer.next();
-          return observer.complete();
-        }
-        observer.error(response.statusText);
-      });
-    });
+    return this.request(url);
   }
 
   private queryLeftTicket({trainDate, fromStation, toStation}): Observable<any> {
@@ -1014,33 +993,26 @@ export class Account {
 
     var url = "https://kyfw.12306.cn/otn/leftTicket/queryZ?"+param;
 
-    return Observable.create((observer: Observer<any>)=> {
-      this.request(url, (error, response, body)=> {
-        if(error) return observer.error(error.toString());
-
-        if(response.statusCode === 200) {
-          if(!body) {
-            return observer.error("系统返回无数据");
-          }
-          if(body.indexOf("请您重试一下") > 0) {
-            return observer.error("系统繁忙!");
-          }else {
-            try {
-              var data = JSON.parse(body).data;
-            }catch(err) {
-              return observer.error(err);
-            }
-            // Resolved
-          observer.next(data);
-          }
+    return this.request(url)
+      .map(body=> {
+        if(!body) {
+          throw "系统返回无数据";
+        }
+        if(body.indexOf("请您重试一下") > 0) {
+          throw "系统繁忙!";
         }else {
-          return observer.error(response.statusCode);
+          try {
+            var data = JSON.parse(body).data;
+          }catch(err) {
+            throw err;
+          }
+          // Resolved
+          return data;
         }
       });
-    });
   }
 
-  private checkUser(): Promise<void> {
+  private checkUser(): Observable<void> {
     var url = "https://kyfw.12306.cn/otn/login/checkUser";
 
     var data = {
@@ -1058,17 +1030,8 @@ export class Account {
       ,form: data
     };
 
-    return new Promise((resolve, reject)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return reject(error);
-
-        if(response.statusCode === 200) {
-          body = JSON.parse(body)
-          return resolve(body);
-        }
-        reject(response.statusMessage);
-      });
-    });
+    return this.request(options)
+      .map(body=>JSON.parse(body));
   }
 
   private submitOrderRequest({trainSecretStr, trainDate, backTrainDate, fromStationName, toStationName}): Observable<object>  {
@@ -1098,17 +1061,8 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<object>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-        if(response.statusCode === 200) {
-          body = JSON.parse(body);
-          observer.next(body);
-          return observer.complete();
-        }
-        return observer.error(response.statusCode);
-      });
-    });
+    return this.request(options)
+      .map(body=>JSON.parse(body));
   }
 
   private confirmPassengerInitDc(): Observable<OrderSubmitRequest> {
@@ -1127,33 +1081,26 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<OrderSubmitRequest>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error.toString());
-
-        if(response.statusCode === 200) {
-          if(this.isSystemBussy(body)) {
-            return observer.error(this.SYSTEM_BUSSY);
-          }
-          if(body) {
-            // Get Repeat Submit Token
-            var token = body.match(/var globalRepeatSubmitToken = '(.*?)';/);
-            var ticketInfoForPassengerForm = body.match(/var ticketInfoForPassengerForm=(.*?);/);
-            var orderRequestDTO = body.match(/var orderRequestDTO=(.*?);/);
-            if(token) {
-              observer.next({
-                token: token[1]
-                ,ticketInfo: ticketInfoForPassengerForm&&JSON.parse(ticketInfoForPassengerForm[1].replace(/'/g, "\""))
-                ,orderRequest: orderRequestDTO&&JSON.parse(orderRequestDTO[1].replace(/'/g, "\""))
-              });
-              return observer.complete();
-            }
-          }
-          return observer.error(this.SYSTEM_BUSSY);
+    return this.request(options)
+      .map(body=> {
+        if(this.isSystemBussy(body)) {
+          throw this.SYSTEM_BUSSY;
         }
-        observer.error(response.statusMessage);
+        if(body) {
+          // Get Repeat Submit Token
+          var token = body.match(/var globalRepeatSubmitToken = '(.*?)';/);
+          var ticketInfoForPassengerForm = body.match(/var ticketInfoForPassengerForm=(.*?);/);
+          var orderRequestDTO = body.match(/var orderRequestDTO=(.*?);/);
+          if(token) {
+            return {
+              token: token[1]
+              ,ticketInfo: ticketInfoForPassengerForm&&JSON.parse(ticketInfoForPassengerForm[1].replace(/'/g, "\""))
+              ,orderRequest: orderRequestDTO&&JSON.parse(orderRequestDTO[1].replace(/'/g, "\""))
+            };
+          }
+        }
+        throw this.SYSTEM_BUSSY;
       });
-    });
   }
 
   private getPassengers(token: string): Observable<any> {
@@ -1173,20 +1120,8 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<any>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error.toString());
-
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            return observer.next(JSON.parse(body));
-          }
-        }
-
-        observer.error(response.statusMessage);
-      });
-    });
-
+    return this.request(options)
+      .map(body=> JSON.parse(body));
   }
 
   /* seat type
@@ -1236,6 +1171,9 @@ export class Account {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/checkOrderInfo";
 
     var passengerTicketStr = this.getPassengerTickets(passengers, planPepoles);
+    if(!passengerTicketStr) {
+      return Observable.throw("没有相关联系人");
+    }
 
     var data = {
       "cancel_flag": 2
@@ -1258,37 +1196,23 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<any>)=> {
-      if(!passengerTicketStr) {
-        return observer.error("没有相关联系人");
-      }
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            let result = JSON.parse(body);
-            /*
-              { validateMessagesShowId: '_validatorMessage',
-                url: '/leftTicket/init',
-                status: false,
-                httpstatus: 200,
-                messages: [ '系统忙，请稍后重试' ],
-                validateMessages: {} }
-             */
-            if(result.status) {
-              observer.next(result);
-              return observer.complete();
-            }else {
-              return observer.error(result.messages[0])
-            }
-          }
+    return this.request(options)
+      .map(body=> JSON.parse(body))
+      .map(body=> {
+        /*
+          { validateMessagesShowId: '_validatorMessage',
+            url: '/leftTicket/init',
+            status: false,
+            httpstatus: 200,
+            messages: [ '系统忙，请稍后重试' ],
+            validateMessages: {} }
+         */
+        if(body.status) {
+          return body;
+        }else {
+          throw body.messages[0];
         }
-
-        observer.error(response.statusMessage);
       });
-    });
-
   }
 
   private getQueueCount(token, orderRequestDTO, ticketInfo): Observable<any> {
@@ -1316,32 +1240,22 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<any>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            /*
-              { validateMessagesShowId: '_validatorMessage',
-                status: false,
-                httpstatus: 200,
-                messages: [ '系统繁忙，请稍后重试！' ],
-                validateMessages: {} }
-             */
-            let result = JSON.parse(body);
-            if(result.status) {
-              observer.next(result);
-              return observer.complete();
-            }else {
-              return observer.error(result.messages[0]);
-            }
-          }
+    return this.request(options)
+      .map(body=> JSON.parse(body))
+      .map(body=> {
+        /*
+          { validateMessagesShowId: '_validatorMessage',
+            status: false,
+            httpstatus: 200,
+            messages: [ '系统繁忙，请稍后重试！' ],
+            validateMessages: {} }
+         */
+        if(body.status) {
+          return body;
+        }else {
+          throw body.messages[0];
         }
-
-        observer.error(response.statusMessage);
-      })
-    })
+      });
   }
 
   private getPassCodeNew(): Observable<void> {
@@ -1354,7 +1268,7 @@ export class Account {
     };
 
     return Observable.create((observer: Observer<void>)=> {
-      this.request(options, (error, response, body)=> {
+      this.rawRequest(options, (error, response, body)=> {
         if(error) return observer.error(error);
         if(response.statusCode!==200)
           observer.error(response.statusMessage);
@@ -1386,25 +1300,12 @@ export class Account {
       output: process.stdout
     });
 
-    return Observable.create((observer: Observer<any>)=> {
-      rl.question('Please input randcode:', (positions) => {
-        rl.close();
-
+    return this.questionCaptcha()
+      .mergeMap(positions=>{
         options.form.randCode = positions;
-        this.request(options, (error, response, body)=> {
-          if(error) return observer.error(error);
-
-          if(response.statusCode === 200) {
-            if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-              observer.next(JSON.parse(body));
-              return observer.complete();
-            }
-          }
-
-          observer.error(response.statusMessage);
-        })
-      });
-    })
+        return this.request(options);
+      })
+      .map(body=> JSON.parse(body));
   }
 
   private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm, planPepoles): Observable<any> {
@@ -1435,23 +1336,11 @@ export class Account {
       ,form: data
     };
 
-    return Observable.create((observer: Observer<any>)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) return observer.error(error);
-
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            observer.next(JSON.parse(body));
-            return observer.complete();
-          }
-        }
-
-        observer.error(response.statusMessage);
-      })
-    })
+    return this.request(options)
+      .map(body=> JSON.parse(body));
   }
 
-  private queryOrderWaitTime(token) {
+  private queryOrderWaitTime(token: string): Observable<any> {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/queryOrderWaitTime";
     var options = {
       url: url
@@ -1468,25 +1357,10 @@ export class Account {
       ,json: true
     };
 
-    return new Promise((resolve: Function, reject: Function)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) reject(error);
-
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            return resolve(body);
-          }
-          if(this.isSystemBussy(body)) {
-            return reject(this.SYSTEM_BUSSY);
-          }
-          return reject(body);
-        }
-        reject(response.statusMessage);
-      });
-    });
+    return this.request(options);
   }
 
-  private cancelQueueNoCompleteOrder() {
+  private cancelQueueNoCompleteOrder(): Observable<any> {
     var url = "https://kyfw.12306.cn/otn/queryOrder/cancelQueueNoCompleteMyOrder";
     var data = {
       tourFlag: "dc"
@@ -1501,24 +1375,16 @@ export class Account {
       ,json: true
     };
 
-    return new Promise((resolve, reject)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) throw error;
-        if(response.statusCode === 200) {
-          if((response.headers["content-type"] || response.headers["Content-Type"]).indexOf("application/json") > -1) {
-            return resolve(body);
-          }
-          if(this.isSystemBussy(body)) {
-            return reject(this.SYSTEM_BUSSY);
-          }
-          return reject(body);
+    return this.request(options)
+      .map(body=> {
+        if(this.isSystemBussy(body)) {
+          throw this.SYSTEM_BUSSY;
         }
-        reject(response.statusMessage);
+        return body;
       });
-    });
   }
 
-  private initNoComplete() {
+  private initNoComplete(): Observable<any> {
     let url = "https://kyfw.12306.cn/otn/queryOrder/initNoComplete";
     let options = {
       url: url
@@ -1531,21 +1397,12 @@ export class Account {
       }
     };
 
-    return new Promise((resolve, reject)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) throw error;
-        if(response.statusCode === 200) {
-          return resolve(body)
-        }else {
-          reject(response.statusCode);
-        }
-      });
-    });
+    return this.request(options);
   }
 
   public myOrderNoComplete() {
-    let sjOrderNoComplete = new Rx.Subject();
-    sjOrderNoComplete.mergeMap(()=> this.queryMyOrderNoComplete())
+    this.observableLoginInit()
+      .mergeMap(()=> this.queryMyOrderNoComplete())
       .subscribe((x)=>{
         /*
           { validateMessagesShowId: '_validatorMessage',
@@ -1607,16 +1464,10 @@ export class Account {
         });
 
         console.log(columns);
-      }, err=>console.error('没有未完成订单'));
-
-    let sjL = new Rx.Subject();
-    this.observableLoginInit()
-      .subscribe(()=>sjOrderNoComplete.next())
-
-    sjL.next();
+      }, err=>console.error(err));
   }
 
-  private queryMyOrderNoComplete() {
+  private queryMyOrderNoComplete(): Observable<any> {
     let url = "https://kyfw.12306.cn/otn/queryOrder/queryMyOrderNoComplete";
     let options = {
       url: url
@@ -1630,27 +1481,21 @@ export class Account {
       ,json: true
     };
 
-    return new Promise((resolve, reject)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) throw error;
-        if(response.statusCode === 200) {
-          if(body.status) {
-            // console.log(body);
-            /**
-              { validateMessagesShowId: '_validatorMessage',
-                status: true,
-                httpstatus: 200,
-                messages: [],
-                validateMessages: {} }
-             */
-            return resolve(body)
-          }
-          return reject(body.messages);
-        }else {
-          reject(response.statusCode);
+    return this.request(options)
+      .map(body=> {
+        if(body.status) {
+          // console.log(body);
+          /**
+            { validateMessagesShowId: '_validatorMessage',
+              status: true,
+              httpstatus: 200,
+              messages: [],
+              validateMessages: {} }
+           */
+          return body;
         }
+        throw body.messages;
       });
-    });
   }
 
   /**
@@ -1666,7 +1511,7 @@ export class Account {
 
         </div>
   */
-  private cancelNoCompleteMyOrder(sequenceNo: string, cancelId: string = 'cancel_order') {
+  private cancelNoCompleteMyOrder(sequenceNo: string, cancelId: string = 'cancel_order'): Observable<any> {
     let url = "https://kyfw.12306.cn/otn/queryOrder/cancelNoCompleteMyOrder";
     let options = {
       url: url
@@ -1682,33 +1527,21 @@ export class Account {
       ,json: true
     };
 
-    return new Promise((resolve, reject)=> {
-      this.request(options, (error, response, body)=> {
-        if(error) throw error;
-        if(response.statusCode === 200) {
-          return resolve(body);
-        }else {
-          reject(response.statusCode);
-        }
-      });
-    });
+    return this.request(options);
   }
 
   public cancelNoCompleteOrder(sequenceNo: string, cancelId: string = 'cancel_order') {
-    let sjCancelOrder = new Rx.Subject();
     this.observableLoginInit()
-      .subscribe(()=>{
-        this.cancelNoCompleteMyOrder(sequenceNo, cancelId)
-          .then(body=> {
-            // {"validateMessagesShowId":"_validatorMessage","status":true,"httpstatus":200,"data":{},"messages":[],"validateMessages":{}}
-            if (body.data.existError == "Y") {
-  						winston.error(chalk`{red ${body.data.errorMsg}}`);
-  					} else {
-  						winston.warn(chalk`{yellow 订单 ${sequenceNo} 已取消}`);
-  					}
-          },err=>winston.error(chalk`{red ${JSON.stringify(err)}}`));
-      });
-
-    sjCancelOrder.next();
+      .mergeMap(()=>this.cancelNoCompleteMyOrder(sequenceNo, cancelId))
+      .subscribe((body)=>{
+          // {"validateMessagesShowId":"_validatorMessage","status":true,"httpstatus":200,"data":{},"messages":[],"validateMessages":{}}
+          if (body.data.existError == "Y") {
+            winston.error(chalk`{red ${body.data.errorMsg}}`);
+          } else {
+            console.warn(chalk`{yellow 订单 ${sequenceNo} 已取消}`);
+          }
+        }
+      ,err=>winston.error(chalk`{red ${JSON.stringify(err)}}`)
+      );
   }
 }
