@@ -9,7 +9,7 @@ import fs = require('fs');
 import readline = require('readline');
 import process = require('process');
 import Rx from 'rxjs/Rx';
-import { Observable } from 'rxjs/Observable';
+import { Observable, ObservableInput } from 'rxjs/Observable';
 import { Observer } from 'rxjs/Observer';
 import 'rxjs/add/observable/bindCallback';
 import chalk = require('chalk');
@@ -118,6 +118,19 @@ export class Account {
 
   public submit(): void {
     this.observableLoginInit()
+      // 检查未完成订单
+      .mergeMap(()=> this.queryMyOrderNoComplete())
+      .do(body=> {
+        if(body.data) {
+          this.printMyOrderNoComplete(body);
+          if(body.data.orderCacheDTO) {
+            throw '您还有排队订单';
+          }else if(body.data.orderDBList){
+            throw '您还有未完成订单';
+          }
+        }
+      })
+      // 准备好后进行订票流程
       .subscribe(()=>{
         this.buildOrderFlow();
 
@@ -126,6 +139,8 @@ export class Account {
             this.observableCheckUser()
               .subscribe(()=>winston.debug("Check user done"));
           });
+      },err=> {
+        console.log(chalk`{red.bold ${err}}`);
       });
   }
 
@@ -220,7 +235,7 @@ export class Account {
         observer.next(newAppToken);
         observer.complete();
       })
-      .mergeMap(newapptk=>this.getAppToken(newapptk))
+      .mergeMap((newapptk: string)=>this.getAppToken(newapptk))
       .retryWhen(error$=>
         error$.do(err=>winston.error(err))
           .mergeMap(err=> {
@@ -271,11 +286,11 @@ export class Account {
           }).reduce((p, n) => p ? p : n, 0);
   }
 
-  private buildQueryLeftTicketFlow(order: Order): Observable<Order> {
+  private buildQueryLeftTicketFlow(order: IOrder): Observable<IOrder> {
 
     return Observable.of(order)
       // 获取余票信息
-      .mergeMap((order: Order)=>
+      .mergeMap((order: IOrder): ObservableInput<IOrder> =>
         this.queryLeftTickets(order.trainDate, order.fromStation, order.toStation, order.planTrains)
           .map((trains)=> {
             order.trains = trains;
@@ -283,30 +298,27 @@ export class Account {
           })
       )
       // 获取途经站车次信息
-      .mergeMap((order: Order)=> {
+      .mergeMap((order: IOrder): ObservableInput<IOrder> => {
         if(order.passStation) {
           if(!order.fromToPassTrains) {
             return this.queryLeftTickets(order.trainDate, order.fromStation, order.passStation, order.planTrains)
-              .then(passTrains=> {
-                order.fromToPassTrains = passTrains.map(train => train[3]);
+              .map(passTrains=> {
+                order.fromToPassTrains = passTrains.map(train=> train[3]);
                 return order;
               });
-          }else {
-            return Promise.resolve(order);
           }
-        }else {
-          return Promise.resolve(order);
         }
+        return Observable.of(order);
       })
       // 按途经站车次过滤
-      .map((order: Order) => {
+      .map((order: IOrder): IOrder => {
         if(order.fromToPassTrains) {
           order.trains = order.trains.filter(train => order.fromToPassTrains.includes(train[3]));
         }
         return order;
       })
       // 按时间范围过滤
-      .map((order: Order) => {
+      .map((order: IOrder): IOrder => {
         if(order.planTimes) {
           let trains = order.trains||[];
           order.trains = trains.filter(train=> {
@@ -317,17 +329,17 @@ export class Account {
         return order;
       })
       // 根据字段排序
-      .map((order: Order)=> {
+      .map((order: IOrder): IOrder => {
         if(order.planOrderBy) {
           order.trains = order.trains.sort(this.fieldSorter(order.planOrderBy));
         }
         return order;
       })
       // 计算可购买车次信息
-      .map((order: Order)=> {
+      .map((order: IOrder): IOrder => {
         let trains = order.trains||[];
 
-        let planTrains: Array<string> = [], that = this;
+        let planTrains: Array<Array<string>> = [], that = this;
         trains.some(train => {
           return order.seatClasses.some(seat => {
             var seatNum = this.TICKET_TITLE.indexOf(seat);
@@ -347,11 +359,11 @@ export class Account {
       });
   }
 
-  private recursiveQueryLeftTicket(): Observable<string> {
-    return Observable.create((observer: Observer<string>)=> {
+  private recursiveQueryLeftTicket(): Observable<Order> {
+    return Observable.create((observer: Observer<Order>)=> {
         observer.next(this.nextOrder());
       })
-      .mergeMap(order=>this.buildQueryLeftTicketFlow(order))
+      .mergeMap((order: Order)=>this.buildQueryLeftTicketFlow(order))
       .do(()=> {
         if(this.query) {
           process.stdout.clearLine();
@@ -369,18 +381,21 @@ export class Account {
           throw chalk`没有可购买余票 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} ${order.passStationName?'到'+order.passStationName+' ':''}{yellow ${order.trainDate}}`;
         }
       })
-      .retryWhen(error$=>error$.do(err=>process.stdout.write(err)).delay(1500))
-      .mergeMap((order: Order)=>this.observableCheckUser().map(()=>order))
+      .retryWhen(error$=>error$.do(err=>process.stdout.write(err)).delay(500))
+      // 检查用户登录状态
+      // .mergeMap((order: Order)=>this.observableCheckUser().map(()=>order))
+
       // Step 11 预提交订单，Post
-      .switchMap((order: Order)=>
-        Observable.of(1)
+      .switchMap((order: Order)=>{
+        console.log(chalk`预提交订单 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} 日期 {yellow ${order.trainDate}}`);
+        return Observable.of(1)
           .mergeMap(()=>this.submitOrderRequest(order))
           .retryWhen(error$=>
-              error$.do(err=>winston.error("SubmitOrderRequest error " + err)
+              error$.do(err=>winston.debug("SubmitOrderRequest error " + err)
                 .delay(500))
           )
-          .map(body=>[order, body])
-      )
+          .map(body=>[order, body]);
+      })
       .map(([order, body])=>{
         if(body.status) {
           winston.debug(chalk`{blue Submit Order Request success!}`);
@@ -448,15 +463,16 @@ export class Account {
           })
       )
       // Step 15 准备进入排队，Post
-      .switchMap((order: Order)=>
-        this.getQueueCount(order.request.token, order.request.orderRequest, order.request.ticketInfo)
+      .switchMap((order: Order)=>{
+        console.log(chalk`准备进入排队`);
+        return this.getQueueCount(order.request.token, order.request.orderRequest, order.request.ticketInfo)
           .map(body=>{
             winston.debug(body);
             order.request.queueInfo = body;
             return order;
           })
-      )
-      .switchMap(order=> {
+      })
+      .switchMap((order: Order)=> {
         // 若 Step 14 中的 "ifShowPassCode" = "Y"，那么多了输入验证码这一步，Post
         if(order.request.orderInfo.data.ifShowPassCode == "Y") {
           return this.observableGetPassCodeNew(order);
@@ -464,15 +480,15 @@ export class Account {
           return Observable.of(order);
         }
       })
-      .switchMap(order=>
-        this.confirmSingleForQueue(order.request.token,
-                                   order.request.passengers.data.normal_passengers,
-                                   order.request.ticketInfo,
-                                   order.planPepoles)
-            .retryWhen(error$=>error$.delay(500))
+      .switchMap((order: Order)=>{
+        console.log(chalk`提交排队订单`);
+        return this.confirmSingleForQueue(order.request.token,
+                                          order.request.passengers.data.normal_passengers,
+                                          order.request.ticketInfo,
+                                          order.planPepoles)
+            .retryWhen(error$=>error$.delay(100))
             .map(body=> {
               if(body.status && body.data.submitStatus) {
-                console.log(chalk`{blue.bold ${JSON.stringify(body.data)}}`);
                 return order;
               }else {
                 /**
@@ -487,7 +503,7 @@ export class Account {
                 throw 'retry';
               }
             })
-      )
+      })
       .retryWhen(error$=>error$.do(err=>winston.error(chalk`{yellow.bold ${err}}`))
           .mergeMap((err)=> {
             if(err == 'retry') {
@@ -526,7 +542,7 @@ export class Account {
       .subscribe(
         (order: Order)=> {
           this.obsQueryOrderWaitT(order)
-            .subscribe((orderRequest: object)=> {
+            .subscribe(()=> {
                 console.log(chalk`{yellow 结束}`);
                 this.destroy();
               },err=>winston.error(chalk`{yellow 错误结束 ${err}}`));
@@ -579,18 +595,18 @@ export class Account {
             if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
               // 0.5秒响一次，响铃30分钟
               beeper(60*30*2);
-              return console.log(chalk`Your ticket order number is {red.bold ${orderQueue.data.orderId}}`);
+              return console.log(chalk`您的车票订单号是 {red.bold ${orderQueue.data.orderId}}`);
             }else if(orderQueue.data.waitTime === -2){
               if(orderQueue.data.msg) {
                 return console.log(chalk`{yellow.bold ${orderQueue.data.msg}}`);
               }
               return console.log(orderQueue);
             }else if(orderQueue.data.waitTime === -3){
-              return console.log("Your ticket request has been canceled!");
+              return console.log("您的车票订单已经取消!");
             }else if(orderQueue.data.waitTime === -4){
-              console.log("Your ticket request is being processed, please wait a moment!");
+              console.log("您的车票订单正在处理, 请稍等...");
             }else {
-              console.log(chalk`{yellow.bold 排队人数：${orderQueue.data.waitCount}} 预计等待时间：${parseInt(orderQueue.data.waitTime / 1.5)} 分钟`);
+              console.log(chalk`排队人数：{yellow.bold ${orderQueue.data.waitCount}} 预计等待时间：{yellow.bold ${parseInt(orderQueue.data.waitTime / 1.5)}} 分钟`);
             }
           }else {
             console.log(orderQueue);
@@ -615,22 +631,22 @@ export class Account {
    *
    * @return Promise
    */
-  public queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string>|null): Observable<Array<any>> {
+  public queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames?: ReadonlyArray<string>): Observable<Array<any>> {
     if(!trainDate) {
       console.log(chalk`{yellow 请输入乘车日期}`);
-      return Observable.throw();
+      return Observable.throw('请输入乘车日期');
     }
     // this.BACK_TRAIN_DATE = trainDate;
 
     if(!fromStation) {
       console.log(chalk`{yellow 请输入出发站}`);
-      return Observable.throw();
+      return Observable.throw('请输入出发站');
     }
     // this.FROM_STATION_NAME = fromStationName;
 
     if(!toStation) {
       console.log(chalk`{yellow 请输入到达站}`);
-      return Observable.throw();
+      return Observable.throw('请输入到达站');
     }
     // this.TO_STATION_NAME = toStationName;
 
@@ -681,15 +697,15 @@ export class Account {
     let toStation: string = this.stations.getStationCode(toStationName);
     let passStation: string = this.stations.getStationCode(passStationName);
 
-    let planTrains: Array<string>|null =
-      typeof f == "string" ? f.split(','):(typeof filter == "string" ? filter.split(','):null);
-    let planTimes: Array<string>|null =
-      typeof t == "string" ? t.split(','):(typeof time == "string" ? time.split(','):null);
-    let planOrderBy: Array<string>|null =
-      typeof o == "string" ? o.split(','):(typeof orderby == "string" ? orderby.split(','):null);
+    let planTrains: ReadonlyArray<string>|undefined =
+      typeof f == "string" ? f.split(','):(typeof filter == "string" ? filter.split(','):undefined);
+    let planTimes: ReadonlyArray<string>|undefined =
+      typeof t == "string" ? t.split(','):(typeof time == "string" ? time.split(','):undefined);
+    let planOrderBy: Array<string|number>|undefined =
+      typeof o == "string" ? o.split(','):(typeof orderby == "string" ? orderby.split(','):undefined);
 
     if(planOrderBy) {
-      planOrderBy = planOrderBy.map((fieldName:string) => {
+      planOrderBy = planOrderBy.map((fieldName:string|number) => {
         if(fieldName[0] === '-' || fieldName[0] === '+') {
           return fieldName[0]+this.TICKET_TITLE.indexOf(fieldName.substring(1));
         }
@@ -699,6 +715,9 @@ export class Account {
 
     this.buildQueryLeftTicketFlow({
         trainDate: trainDate
+        ,backTrainDate: trainDate
+        ,fromStationName: fromStationName
+        ,toStationName: toStationName
         ,fromStation: fromStation
         ,toStation: toStation
         ,passStation: passStation
@@ -707,7 +726,7 @@ export class Account {
         ,planOrderBy: planOrderBy
         ,seatClasses: []
       })
-      .subscribe((order: Order) => {
+      .subscribe((order: IOrder) => {
         let trains = this.renderTrainListTitle(order.trains);
         if(trains.length === 0) {
           return console.log(chalk`{yellow 没有符合条件的车次}`)
@@ -1412,59 +1431,63 @@ export class Account {
             messages: [],
             validateMessages: {} }
          */
-         if(!x.data) {
-           console.error(chalk`{yellow 没有未完成订单}`)
-           return;
-         }
-        let tickets = [];
-        if(x.data.orderCacheDTO) {
-          let orderCache = x.data.orderCacheDTO;
-          orderCache.tickets.forEach(ticket=> {
-            tickets.push({
-              "排队号": orderCache.queueName,
-              "等待时间": orderCache.waitTime,
-              "等待人数": orderCache.waitCount,
-              "余票数": orderCache.ticketCount,
-              "乘车日期": orderCache.trainDate.slice(0,10),
-              "车次": orderCache.stationTrainCode,
-              "出发站": orderCache.fromStationName,
-              "到达站": orderCache.toStationName,
-              "座位等级": ticket.seatTypeName,
-              "乘车人": ticket.passengerName
-            });
-          });
-
-        }else if(x.data.orderDBList){
-
-          x.data.orderDBList.forEach(order=> {
-            // console.log(chalk`订单号 {yellow.bold ${order.sequence_no}}`)
-            order.tickets.forEach(ticket=> {
-              tickets.push({
-                "订单号": ticket.sequence_no,
-                // "订票号": ticket.ticket_no,
-                "乘车日期": chalk`{yellow.bold ${ticket.train_date.slice(0,10)}}`,
-                // "下单时间": ticket.reserve_time,
-                "付款截至时间": chalk`{red.bold ${ticket.pay_limit_time}}`,
-                "金额": chalk`{yellow.bold ${ticket.ticket_price/100}}`,
-                "状态": chalk`{yellow.bold ${ticket.ticket_status_name}}`,
-                "乘车人": ticket.passengerDTO.passenger_name,
-                "车次": ticket.stationTrainDTO.station_train_code,
-                "出发站": ticket.stationTrainDTO.from_station_name,
-                "到达站": ticket.stationTrainDTO.to_station_name,
-                "座位": ticket.seat_name,
-                "座位等级": ticket.seat_type_name,
-                "乘车人类型": ticket.ticket_type_name
-              });
-            });
-          });
-        }
-
-        var columns = columnify(tickets, {
-          columnSplitter: '|'
-        });
-
-        console.log(columns);
+         this.printMyOrderNoComplete(x);
       }, err=>console.error(err));
+  }
+
+  private printMyOrderNoComplete(x) {
+    if(!x.data) {
+      console.error(chalk`{yellow 没有未完成订单}`)
+      return;
+    }
+   let tickets = [];
+   if(x.data.orderCacheDTO) {
+     let orderCache = x.data.orderCacheDTO;
+     orderCache.tickets.forEach(ticket=> {
+       tickets.push({
+         "排队号": orderCache.queueName,
+         "等待时间": orderCache.waitTime,
+         "等待人数": orderCache.waitCount,
+         "余票数": orderCache.ticketCount,
+         "乘车日期": orderCache.trainDate.slice(0,10),
+         "车次": orderCache.stationTrainCode,
+         "出发站": orderCache.fromStationName,
+         "到达站": orderCache.toStationName,
+         "座位等级": ticket.seatTypeName,
+         "乘车人": ticket.passengerName
+       });
+     });
+
+   }else if(x.data.orderDBList){
+
+     x.data.orderDBList.forEach(order=> {
+       // console.log(chalk`订单号 {yellow.bold ${order.sequence_no}}`)
+       order.tickets.forEach(ticket=> {
+         tickets.push({
+           "订单号": ticket.sequence_no,
+           // "订票号": ticket.ticket_no,
+           "乘车日期": chalk`{yellow.bold ${ticket.train_date.slice(0,10)}}`,
+           // "下单时间": ticket.reserve_time,
+           "付款截至时间": chalk`{red.bold ${ticket.pay_limit_time}}`,
+           "金额": chalk`{yellow.bold ${ticket.ticket_price/100}}`,
+           "状态": chalk`{yellow.bold ${ticket.ticket_status_name}}`,
+           "乘车人": ticket.passengerDTO.passenger_name,
+           "车次": ticket.stationTrainDTO.station_train_code,
+           "出发站": ticket.stationTrainDTO.from_station_name,
+           "到达站": ticket.stationTrainDTO.to_station_name,
+           "座位": ticket.seat_name,
+           "座位等级": ticket.seat_type_name,
+           "乘车人类型": ticket.ticket_type_name
+         });
+       });
+     });
+   }
+
+   var columns = columnify(tickets, {
+     columnSplitter: '|'
+   });
+
+   console.log(columns);
   }
 
   private queryMyOrderNoComplete(): Observable<any> {

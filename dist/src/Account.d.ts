@@ -56,7 +56,7 @@ export declare class Account {
      *
      * @return Promise
      */
-    queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames: Array<string> | null): Observable<Array<any>>;
+    queryLeftTickets(trainDate: string, fromStation: string, toStation: string, trainNames?: ReadonlyArray<string>): Observable<Array<any>>;
     /**
      * 查询列车余票信息
      *
@@ -106,6 +106,7 @@ export declare class Account {
     private cancelQueueNoCompleteOrder();
     private initNoComplete();
     myOrderNoComplete(): void;
+    private printMyOrderNoComplete(x);
     private queryMyOrderNoComplete();
     /**
     <div class="t-btn">

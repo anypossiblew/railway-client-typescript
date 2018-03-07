@@ -7,20 +7,22 @@ export interface OrderSubmitRequest {
 }
 
 export interface IOrder {
-  trainDate: string
-  ,backTrainDate: string
-  ,fromStationName: string
-  ,toStationName: string
-  ,passStationName?: string
-  ,planTrains: ReadonlyArray<string>
-  ,planPepoles: ReadonlyArray<string>
-  ,planTimes?: Array<string>
-  ,fromStation: string
-  ,toStation: string
-  ,passStation?: string
-  ,seatClasses: ReadonlyArray<string>
+  trainDate: string;
+  backTrainDate: string;
+  fromStationName: string;
+  toStationName: string;
+  passStationName?: string;
+  planTrains?: ReadonlyArray<string>;
+  planPepoles?: ReadonlyArray<string>;
+  fromStation: string;
+  toStation: string;
+  passStation?: string;
+  seatClasses: ReadonlyArray<string>;
   trains?: Array<Array<string>>;
   request?: any;
+  planTimes?: ReadonlyArray<string>
+  availableTrains?: Array<Array<string>>;
+  planOrderBy?: Array<string|number>;
 }
 
 export class Order implements IOrder {
@@ -33,7 +35,7 @@ export class Order implements IOrder {
   public toStation: string;
   public passStation?: string;
   public planTrains: ReadonlyArray<string>;
-  public planPepoles: ReadonlyArray<string>;
+  public planPepoles?: ReadonlyArray<string>;
   public seatClasses: ReadonlyArray<string>;
   public trains?: Array<Array<string>>;
 

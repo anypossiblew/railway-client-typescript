@@ -1,5 +1,6 @@
 # railway-client-typescript
 High speed railway client (TypeScript version)
+史上最健壮 Robust 的12306抢票程序，跨站抢票，多账号抢票
 
 
 ## Usage
@@ -27,17 +28,7 @@ High speed railway client (TypeScript version)
 
 输出报表数据如下：
 
-```
-3    |4       |5       |6       |7    |8   |9   |10   |11 |20|21      |22|23  |24  |25    |26  |27|28  |29  |30    |31    |32
-车次 |起始    |终点    |出发站 |到达站 |出发时|到达时|历时|  |  |高级软卧 |  |软卧|软座|特等座 |无座|  |硬卧 |硬座|二等座|一等座 |商务座
-G1970|上海虹桥|兰州西  |上海虹桥|苏州北|06:09|06:32|00:23|Y |  |        |  |    |    |      |    |  |    |    |有    |4     |7
-G1802|上海虹桥|郑州东  |上海虹桥|苏州北|06:14|06:37|00:23|Y |  |        |  |    |    |      |    |  |    |    |有    |1     |1
-G102 |上海虹桥|北京南  |上海虹桥|苏州北|06:30|06:53|00:23|Y |  |        |  |    |    |      |    |  |    |    |有    |11    |1
-G108 |上海虹桥|北京南  |上海虹桥|苏州北|07:19|07:42|00:23|Y |  |        |  |    |    |      |    |  |    |    |有    |有    |1
-G1974|上海虹桥|重庆西  |上海虹桥|苏州北|07:24|07:48|00:24|Y |  |        |  |    |    |      |    |  |    |    |有    |1     |无
-G1232|上海虹桥|丹东    |上海虹桥|苏州北|07:39|08:12|00:33|Y |  |        |  |    |    |      |    |  |    |    |有    |无    |无
-...
-```
+![IMG: leftTickets](./resources/leftTickets-2.png)
 
 #### Query Left Tickets Options
 
@@ -53,14 +44,17 @@ G1232|上海虹桥|丹东    |上海虹桥|苏州北|07:39|08:12|00:33|Y |  |   
 
 `node dist/index.js myOrderNoComplete` 查询未完成订单情况
 
-```
-订单号     |乘车日期  |付款截至时间        |金额 |状态  |乘车人|车次 |出发站|到达站  |座位 |座位等级|乘车人类型
-EG03398601|2018-03-02|2018-02-24 13:50:45|34.5|待支付|张三  |G1821|苏州北|上海虹桥|09A号|二等座  |成人票
-```
+![IMG: myOrderNoComplete](./resources/myOrderNoComplete.png)
 
 ### 取消未完成订单
 
 `node dist/index.js cancelNoCompleteOrder EG03398601`
+
+![IMG: cancelNoCompleteOrder](./resources/cancelNoCompleteOrder.png)
+
+### 提交订票前会自动检查未完成订单
+
+![IMG: checkMyOrderNoComplete](./resources/checkMyOrderNoComplete.png)
 
 ## Develop
 
@@ -73,6 +67,12 @@ EG03398601|2018-03-02|2018-02-24 13:50:45|34.5|待支付|张三  |G1821|苏州�
 gulp: `npm install gulp -g`
 
 ## Updates
+### V0.5
+1. 全面使用 [RxJS](https://github.com/Reactive-Extensions/RxJS) Observable 异步能力优化数据流程，做到最健壮 Robust 的抢票程序；
+2. 新增提交订票前检查未完成订单
+3. 规范控制台日志打印
+4. 自动打开验证码图片
+
 ### v0.4
 1. 新增定时检查用户登录状态功能，防止用户会话超时退出
 2. 新增跨站订票能力
