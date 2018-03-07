@@ -1,8 +1,14 @@
 import {Station} from './Station';
 
+export interface TicketInfo {
+  leftDetails: Array<string>;
+  limitBuySeatTicketDTO: any;
+  purpose_codes: string;
+  [p: string]: any;
+}
 export interface OrderSubmitRequest {
   token: string;
-  ticketInfo: object;
+  ticketInfo: TicketInfo;
   orderRequest: object;
 }
 

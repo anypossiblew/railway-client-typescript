@@ -1,0 +1,79 @@
+{ //成人票
+  "1": [{
+    "end_station_name": null,
+    "end_time": null,
+    "id": "M",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "一等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "O",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "二等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "P",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "特等座"
+  }],
+  //儿童票
+  "2": [{
+    "end_station_name": null,
+    "end_time": null,
+    "id": "M",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "一等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "O",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "二等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "P",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "特等座"
+  }],
+  //学生票
+  "3": [{
+    "end_station_name": null,
+    "end_time": null,
+    "id": "O",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "二等座"
+  }],
+  //残军票
+  "4": [{
+    "end_station_name": null,
+    "end_time": null,
+    "id": "M",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "一等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "O",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "二等座"
+  }, {
+    "end_station_name": null,
+    "end_time": null,
+    "id": "P",
+    "start_station_name": null,
+    "start_time": null,
+    "value": "特等座"
+  }]
+}

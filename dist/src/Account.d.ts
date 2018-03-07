@@ -95,13 +95,13 @@ export declare class Account {
     private submitOrderRequest({trainSecretStr, trainDate, backTrainDate, fromStationName, toStationName});
     private confirmPassengerInitDc();
     private getPassengers(token);
-    private getPassengerTickets(passengers, planPepoles);
+    private getPassengerTickets(seatType, passengers, planPepoles);
     private getOldPassengers(passengers, planPepoles);
-    private checkOrderInfo(submitToken, passengers, planPepoles);
-    private getQueueCount(token, orderRequestDTO, ticketInfo);
+    private checkOrderInfo(submitToken, seatType, passengers, planPepoles);
+    private getQueueCount(token, seatType, orderRequestDTO, ticketInfo);
     private getPassCodeNew();
     private checkRandCodeAnsyn();
-    private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm, planPepoles);
+    private confirmSingleForQueue(token, seatType, passengers, ticketInfoForPassengerForm, planPepoles);
     private queryOrderWaitTime(token);
     private cancelQueueNoCompleteOrder();
     private initNoComplete();

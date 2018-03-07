@@ -148,6 +148,12 @@ export class Account {
     this.observableLoginInit()
       .subscribe(()=>{
         this.obsQueryOrderWaitT(new Order())
+          .mergeMap((orderId)=>this.queryMyOrderNoComplete())
+          .do((body)=> {
+            if(body.data) {
+              this.printMyOrderNoComplete(body);
+            }
+          })
           .subscribe((orderRequest: object)=> {
               console.log(chalk`{yellow 结束}`);
               this.destroy();
@@ -391,8 +397,8 @@ export class Account {
         return Observable.of(1)
           .mergeMap(()=>this.submitOrderRequest(order))
           .retryWhen(error$=>
-              error$.do(err=>winston.debug("SubmitOrderRequest error " + err)
-                .delay(500))
+              error$.do(err=>winston.debug("SubmitOrderRequest error " + err))
+                .delay(100)
           )
           .map(body=>[order, body]);
       })
@@ -421,14 +427,36 @@ export class Account {
                   return Observable.timer(500);
                 }
                 return Observable.throw(err);
+
               })
           )
-          .map(orderSubmitRequest=>[order, orderSubmitRequest])
+          .do(orderSubmitRequest=> {
+            winston.debug("confirmPassenger Init Dc success! "+orderSubmitRequest.token);
+            console.log(chalk`{yellow ${orderSubmitRequest.ticketInfo.leftDetails.join("\t")}}`);
+          })
+          .map(orderSubmitRequest=>{
+            order.request = orderSubmitRequest;
+
+            let hasSeat = order.seatClasses.some((seatType: string)=> {
+              return orderSubmitRequest.ticketInfo.limitBuySeatTicketDTO.ticket_seat_codeMap["1"].some((ticketSeatCode)=> {
+                if(ticketSeatCode.value == seatType) {
+                  order.seatType = ticketSeatCode.id;
+                  return true;
+                }
+                return false;
+              });
+            });
+
+            if(!hasSeat) {
+              winston.debug("confirmPassenger Init 没有可购买余票，重新查询");
+              throw 'retry';
+            }
+
+            return order;
+          })
       )
       // Step 13 常用联系人确定，Post
-      .switchMap(([order, orderRequest])=> {
-        winston.debug("confirmPassenger Init Dc success! "+orderRequest.token);
-        order.request = orderRequest;
+      .switchMap((order: Order)=> {
         if(this.passengers) {
           order.request.passengers = this.passengers;
           return Observable.of(order);
@@ -447,7 +475,7 @@ export class Account {
       })
       // Step 14 购票人确定，Post
       .switchMap((order: Order)=>
-        this.checkOrderInfo(order.request.token, order.request.passengers.data.normal_passengers, order.planPepoles)
+        this.checkOrderInfo(order.request.token, order.seatType, order.request.passengers.data.normal_passengers, order.planPepoles)
           .retryWhen(error$=>
             error$.do(err=>winston.error(err)).mergeMap(err=> {
               if(err == "没有相关联系人") {
@@ -464,13 +492,35 @@ export class Account {
       )
       // Step 15 准备进入排队，Post
       .switchMap((order: Order)=>{
-        console.log(chalk`准备进入排队`);
-        return this.getQueueCount(order.request.token, order.request.orderRequest, order.request.ticketInfo)
+        process.stdout.write(chalk`准备进入排队`);
+        return this.getQueueCount(order.request.token, order.seatType, order.request.orderRequest, order.request.ticketInfo)
+          .map(body=> {
+            /*
+              { validateMessagesShowId: '_validatorMessage',
+                status: false,
+                httpstatus: 200,
+                messages: [ '系统繁忙，请稍后重试！' ],
+                validateMessages: {} }
+             */
+            if(body.status) {
+              return body;
+            }else {
+              throw body.messages[0];
+            }
+          })
+          .retryWhen(error$=>error$.mergeMap(err=> {
+              if(err == '系统繁忙，请稍后重试！') {
+                process.stdout.write('.');
+                return Observable.timer(1000);
+              }
+              return Observable.throw(err);
+            }))
           .map(body=>{
             winston.debug(body);
             order.request.queueInfo = body;
             return order;
           })
+          .do(()=>console.log())
       })
       .switchMap((order: Order)=> {
         // 若 Step 14 中的 "ifShowPassCode" = "Y"，那么多了输入验证码这一步，Post
@@ -483,6 +533,7 @@ export class Account {
       .switchMap((order: Order)=>{
         console.log(chalk`提交排队订单`);
         return this.confirmSingleForQueue(order.request.token,
+                                          order.seatType,
                                           order.request.passengers.data.normal_passengers,
                                           order.request.ticketInfo,
                                           order.planPepoles)
@@ -542,6 +593,14 @@ export class Account {
       .subscribe(
         (order: Order)=> {
           this.obsQueryOrderWaitT(order)
+            .mergeMap((orderId)=>this.queryMyOrderNoComplete())
+            .do((body)=> {
+              if(body.data) {
+                this.printMyOrderNoComplete(body);
+                // 0.5秒响一次，响铃30分钟
+                beeper(60*30*2);
+              }
+            })
             .subscribe(()=> {
                 console.log(chalk`{yellow 结束}`);
                 this.destroy();
@@ -569,8 +628,8 @@ export class Account {
   }
 
   private obsQueryOrderWaitT(order: Order): Observable<void> {
-    return Observable.of(order)
-        .mergeMap((order: Order)=> this.queryOrderWaitTime(""))
+    return Observable.of(1)
+        .mergeMap(()=> this.queryOrderWaitTime(""))
         .map(orderQueue=> {
           winston.debug(JSON.stringify(orderQueue));
           /**
@@ -593,16 +652,15 @@ export class Account {
           */
           if(orderQueue.status) {
             if(orderQueue.data.waitTime === 0 || orderQueue.data.waitTime === -1) {
-              // 0.5秒响一次，响铃30分钟
-              beeper(60*30*2);
-              return console.log(chalk`您的车票订单号是 {red.bold ${orderQueue.data.orderId}}`);
+              //return console.log(chalk`您的车票订单号是 {red.bold ${orderQueue.data.orderId}}`);
+              return orderQueue.data.orderId;
             }else if(orderQueue.data.waitTime === -2){
               if(orderQueue.data.msg) {
                 return console.log(chalk`{yellow.bold ${orderQueue.data.msg}}`);
               }
-              return console.log(orderQueue);
+              throw orderQueue.data.msg;
             }else if(orderQueue.data.waitTime === -3){
-              return console.log("您的车票订单已经取消!");
+              throw "您的车票订单已经取消!";
             }else if(orderQueue.data.waitTime === -4){
               console.log("您的车票订单正在处理, 请稍等...");
             }else {
@@ -613,11 +671,13 @@ export class Account {
           }
           throw 'retry';
         })
-        .retryWhen((errors)=>errors.do((err)=>{
-          if(err!='retry') {
-            winston.error(err)
-          }
-        }).delay(4000))
+        .retryWhen((errors$)=>errors$.mergeMap((err)=> {
+            if(err == 'retry') {
+              return Observable.timer(4000)
+            }
+            return Observable.throw(err);
+          })
+        )
         ;
   }
 
@@ -1149,12 +1209,12 @@ export class Account {
   ‘一等座’ => ‘M’,
   ‘硬座’ => ‘1’,
    */
-  private getPassengerTickets(passengers, planPepoles): string {
+  private getPassengerTickets(seatType, passengers, planPepoles): string {
     var tickets = [];
     passengers.forEach(passenger=> {
       if(planPepoles.includes(passenger.passenger_name)) {
         //座位类型,0,票类型(成人/儿童),name,身份类型(身份证/军官证....),身份证,电话号码,保存状态
-        var ticket = /*passenger.seat_type*/ "O" +
+        var ticket = /*passenger.seat_type*/ seatType +
                 ",0," +
                 /*limit_tickets[aA].ticket_type*/"1" + "," +
                 passenger.passenger_name + "," +
@@ -1186,10 +1246,10 @@ export class Account {
     return tickets.join("_")+"_";
   }
 
-  private checkOrderInfo(submitToken, passengers, planPepoles): Observable<any> {
+  private checkOrderInfo(submitToken, seatType, passengers, planPepoles): Observable<any> {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/checkOrderInfo";
 
-    var passengerTicketStr = this.getPassengerTickets(passengers, planPepoles);
+    var passengerTicketStr = this.getPassengerTickets(seatType, passengers, planPepoles);
     if(!passengerTicketStr) {
       return Observable.throw("没有相关联系人");
     }
@@ -1234,13 +1294,13 @@ export class Account {
       });
   }
 
-  private getQueueCount(token, orderRequestDTO, ticketInfo): Observable<any> {
+  private getQueueCount(token, seatType, orderRequestDTO, ticketInfo): Observable<any> {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/getQueueCount";
     var data = {
       "train_date": new Date(orderRequestDTO.train_date.time).toString()
       ,"train_no": orderRequestDTO.train_no
       ,"stationTrainCode": orderRequestDTO.station_train_code
-      ,"seatType":1
+      ,"seatType": seatType
       ,"fromStationTelecode": orderRequestDTO.from_station_telecode
       ,"toStationTelecode": orderRequestDTO.to_station_telecode
       ,"leftTicket": ticketInfo.queryLeftTicketRequestDTO.ypInfoDetail
@@ -1261,20 +1321,7 @@ export class Account {
 
     return this.request(options)
       .map(body=> JSON.parse(body))
-      .map(body=> {
-        /*
-          { validateMessagesShowId: '_validatorMessage',
-            status: false,
-            httpstatus: 200,
-            messages: [ '系统繁忙，请稍后重试！' ],
-            validateMessages: {} }
-         */
-        if(body.status) {
-          return body;
-        }else {
-          throw body.messages[0];
-        }
-      });
+      ;
   }
 
   private getPassCodeNew(): Observable<void> {
@@ -1327,10 +1374,10 @@ export class Account {
       .map(body=> JSON.parse(body));
   }
 
-  private confirmSingleForQueue(token, passengers, ticketInfoForPassengerForm, planPepoles): Observable<any> {
+  private confirmSingleForQueue(token, seatType, passengers, ticketInfoForPassengerForm, planPepoles): Observable<any> {
     var url = "https://kyfw.12306.cn/otn/confirmPassenger/confirmSingleForQueue";
     var data = {
-      "passengerTicketStr": this.getPassengerTickets(passengers, planPepoles)
+      "passengerTicketStr": this.getPassengerTickets(seatType, passengers, planPepoles)
       ,"oldPassengerStr": this.getOldPassengers(passengers, planPepoles)
       ,"randCode":""
       ,"purpose_codes": ticketInfoForPassengerForm.purpose_codes

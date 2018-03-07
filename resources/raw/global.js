@@ -1,0 +1,17 @@
+var ctx='/otn/';
+var globalRepeatSubmitToken = null;
+var global_lang = 'zh_CN';
+var sessionInit = '';
+var isShowNotice = null;
+var CLeftTicketUrl = null;
+var isTestFlow = null;
+var isMobileCheck = null;
+var passport_appId = 'otn';
+var passport_login = 'https://kyfw.12306.cn/passport/web/login';
+var passport_captcha = 'https://kyfw.12306.cn/passport/captcha/captcha-image';
+var passport_authuam = 'https://kyfw.12306.cn/passport/web/auth/uamtk';
+var passport_captcha_check = 'https://kyfw.12306.cn/passport/captcha/captcha-check';
+var passport_authclient = 'uamauthclient';
+var passport_loginPage = 'login/init';
+var passport_okPage = 'index/initMy12306';
+var passport_proxy_captcha =  'login/init';

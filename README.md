@@ -69,9 +69,10 @@ gulp: `npm install gulp -g`
 ## Updates
 ### V0.5
 1. 全面使用 [RxJS](https://github.com/Reactive-Extensions/RxJS) Observable 异步能力优化数据流程，做到最健壮 Robust 的抢票程序；
-2. 新增提交订票前检查未完成订单
+2. 新增支持座位类型
 3. 规范控制台日志打印
 4. 自动打开验证码图片
+5. 新增提交订票前检查未完成订单
 
 ### v0.4
 1. 新增定时检查用户登录状态功能，防止用户会话超时退出
