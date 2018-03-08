@@ -18,16 +18,12 @@ import beeper = require('beeper');
 import child_process = require('child_process');
 
 import {OrderSubmitRequest, IOrder, Order} from './Order';
-
-interface OrderSubmitRequest {
-  token: string;
-  ticketInfo: object;
-  orderRequest: object;
-}
+import { Manager } from './Manager';
 
 export class Account {
+  private manager: Manager;
   public userName : string;
-  public userPassword : string;
+  private userPassword : string;
   private checkUserTimer = Rx.Observable.timer(1000*60*10, 1000*60*10); // 十分钟之后开始，每十分钟检查一次
   private scptCheckUserTimer?: Rx.Subscription;
 
@@ -56,7 +52,8 @@ export class Account {
 
   private orders: Array<Order> = [];
 
-  constructor(name: string, userPassword: string) {
+  constructor(name: string, userPassword: string, manager: Manager) {
+    this.manager = manager;
     this.userName = name;
     this.userPassword = userPassword;
 
@@ -80,11 +77,7 @@ export class Account {
     let cookieFileName: string = "./cookies/"+this.userName+".json";
     var fileStore = new FileCookieStore(cookieFileName, {encrypt: false});
     fileStore.option = {encrypt: false};
-
     this.cookiejar = request.jar(fileStore);
-
-    // this.request = request.defaults({jar: this.cookiejar});
-
   }
 
   private nextOrderNum: number = 0;
@@ -117,7 +110,8 @@ export class Account {
   }
 
   public submit(): void {
-    this.observableLoginInit()
+    // this.observableLoginInit()
+    Observable.of(1)
       // 检查未完成订单
       .mergeMap(()=> this.queryMyOrderNoComplete())
       .do(body=> {
@@ -140,6 +134,7 @@ export class Account {
               .subscribe(()=>winston.debug("Check user done"));
           });
       },err=> {
+        beeper(60*30*2);
         console.log(chalk`{red.bold ${err}}`);
       });
   }
@@ -182,7 +177,7 @@ export class Account {
   }
 
   public destroy() {
-    this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
+    // this.scptCheckUserTimer&&this.scptCheckUserTimer.unsubscribe();
   }
 
   private observableCheckCaptcha(): Observable<void> {
@@ -196,7 +191,8 @@ export class Account {
       )
       .retryWhen(error$=>
         error$.do(()=>console.log(chalk`{yellow.bold 校验失败，重新校验}`))
-      );
+      )
+      ;
   }
 
   private observableLogin(): Observable<void> {
@@ -247,17 +243,17 @@ export class Account {
           .mergeMap(err=> {
             console.log(chalk`{yellow.bold 获取Token失败}`);
             winston.debug(err);
-            if(err.result_code && err.result_code === 2) {
-              return this.observableNewAppToken().do((newapptk)=>newAppToken = newapptk);
-            }else {
-              return Observable.timer(500);
-            }
+            return this.observableNewAppToken().do((newapptk)=>newAppToken = newapptk);
+            // if(err.result_code && err.result_code === 2) {
+            //
+            // }else {
+            //   return Observable.timer(500);
+            // }
           })
       );
   }
 
-  private observableLoginInit(): Observable<string> {
-
+  public observableLoginInit(): Observable<string> {
     // 登录初始化
     return Observable.of(1)
       .mergeMap(order=>this.loginInit())
@@ -865,6 +861,7 @@ export class Account {
         if(error) return observer.error(error);
       }).pipe(fs.createWriteStream("captcha.BMP")).on('close', function(){
         observer.next();
+        observer.complete();
       });
     });
   }

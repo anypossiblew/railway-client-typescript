@@ -2,35 +2,18 @@ accounts:
   - username: xxxxxxxxxx
     password: **********
     orders:
-      - trainDate:
-          - 2018-03-07
-          - 2018-03-08
-          - 2018-03-09
-        backTrainDate: 2018-03-07
-        fromStationName: 徐州
-        toStationName: 上海
-        trains:
-          - G225
-          - G1969
-        planPepoles:
-          - 李四
-        seatTypes:
-          - 二等座
-          - 一等座
+      - trainDates: 2018-03-10 2018-03-11 2018-03-12
+        backTrainDate: 2018-03-09
+        stationNames: 苏州 上海 杭州
+        trains: D955 G1969
+        pepoles: 张三 李四
+        seatTypes: 一等座 二等座
   - username: yyyyyyyyyy
     password: **********
     orders:
-      - trainDate:
-          - 2018-03-07
-          - 2018-03-08
-          - 2018-03-09
-        backTrainDate: 2018-03-07
-        fromStationName: 北京
-        toStationName: 上海
-        trains:
-          - G1969
-        planPepoles:
-          - 张三
-        seatTypes:
-          - 一等座
-          - 特等座
+      - trainDates: 2018-03-10 2018-03-11 2018-03-12
+        backTrainDate: 2018-03-09
+        stationNames: 徐州 上海
+        trains: D955 G1969
+        pepoles: 张三
+        seatTypes: 二等座 一等座

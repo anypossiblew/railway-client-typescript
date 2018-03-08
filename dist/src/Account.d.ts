@@ -1,8 +1,10 @@
 import { Observable } from 'rxjs/Observable';
 import 'rxjs/add/observable/bindCallback';
+import { Manager } from './Manager';
 export declare class Account {
+    private manager;
     userName: string;
-    userPassword: string;
+    private userPassword;
     private checkUserTimer;
     private scptCheckUserTimer?;
     private stations;
@@ -16,7 +18,7 @@ export declare class Account {
     private TICKET_TITLE;
     private query;
     private orders;
-    constructor(name: string, userPassword: string);
+    constructor(name: string, userPassword: string, manager: Manager);
     /**
      * 检查网络异常
      */
@@ -34,7 +36,7 @@ export declare class Account {
     private observableLogin();
     private observableNewAppToken();
     private observableAppToken(newapptk);
-    private observableLoginInit();
+    observableLoginInit(): Observable<string>;
     /**
      * 数组多关键字段排序算法，字段默认为递减排序，如果字段前面带有+符号则为递增排序
      */
