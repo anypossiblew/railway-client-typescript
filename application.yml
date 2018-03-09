@@ -17,3 +17,7 @@ accounts:
         trains: D955 G1969
         pepoles: 张三
         seatTypes: 二等座 一等座
+
+
+performance:
+  query_interval: 100

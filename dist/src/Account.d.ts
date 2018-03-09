@@ -1,10 +1,14 @@
 import { Observable } from 'rxjs/Observable';
 import 'rxjs/add/observable/bindCallback';
 import { Manager } from './Manager';
+export interface Options {
+    performance?: any;
+}
 export declare class Account {
     private manager;
     userName: string;
     private userPassword;
+    options: Options;
     private checkUserTimer;
     private scptCheckUserTimer?;
     private stations;
@@ -18,7 +22,7 @@ export declare class Account {
     private TICKET_TITLE;
     private query;
     private orders;
-    constructor(name: string, userPassword: string, manager: Manager);
+    constructor(name: string, userPassword: string, manager: Manager, options?: Options);
     /**
      * 检查网络异常
      */

@@ -20,10 +20,15 @@ import child_process = require('child_process');
 import {OrderSubmitRequest, IOrder, Order} from './Order';
 import { Manager } from './Manager';
 
+export interface Options {
+  performance?: any;
+}
+
 export class Account {
   private manager: Manager;
   public userName : string;
   private userPassword : string;
+  public options: Options;
   private checkUserTimer = Rx.Observable.timer(1000*60*10, 1000*60*10); // 十分钟之后开始，每十分钟检查一次
   private scptCheckUserTimer?: Rx.Subscription;
 
@@ -52,10 +57,16 @@ export class Account {
 
   private orders: Array<Order> = [];
 
-  constructor(name: string, userPassword: string, manager: Manager) {
+  constructor(name: string, userPassword: string, manager: Manager, options?: Options) {
     this.manager = manager;
     this.userName = name;
     this.userPassword = userPassword;
+    this.options = options || // default options
+      {
+        performance: {
+          query_interval: 1000
+        }
+      };
 
     this.setRequest();
     this.rawRequest = request.defaults({jar: this.cookiejar});
@@ -383,7 +394,10 @@ export class Account {
           throw chalk`没有可购买余票 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} ${order.passStationName?'到'+order.passStationName+' ':''}{yellow ${order.trainDate}}`;
         }
       })
-      .retryWhen(error$=>error$.do(err=>process.stdout.write(err)).delay(500))
+      .retryWhen(error$=>
+        error$.do(err=>process.stdout.write(err))
+          .delay(this.options.performance.query_interval || 1000)
+      )
       // 检查用户登录状态
       // .mergeMap((order: Order)=>this.observableCheckUser().map(()=>order))
 
@@ -712,7 +726,9 @@ export class Account {
                                           toStation: toStation})
                                         )
       // .retry(Number.MAX_SAFE_INTEGER)
-      .retryWhen((errors$)=>errors$.do(()=>process.stdout.write(".")).delay(1500))
+      .retryWhen((errors$)=>
+        errors$.do(()=>process.stdout.write("."))
+          .delay(this.options.performance.query_interval || 1000))
       .map(trainsData => trainsData.result)
       .map(result => {
         let trains: Array<Array<string>> = [];

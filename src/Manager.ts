@@ -11,8 +11,10 @@ import 'rxjs/add/observable/forkJoin';
 import { Account } from './Account';
 
 
+
 export class Manager {
   private accountConfigs: any;
+
   public defaultAccount?: Account;
   public accounts: Array<Account>;
   private captchLock: Subject<void> = new Subject<void>();
@@ -21,7 +23,7 @@ export class Manager {
   constructor(path: string) {
     try {
       var application = yaml.safeLoad(fs.readFileSync(path, 'utf8'));
-      // console.info(JSON.stringify(application));
+      console.info(JSON.stringify(application));
       this.accountConfigs = application.accounts;
     } catch (e) {
       winston.error(e);
@@ -37,7 +39,7 @@ export class Manager {
 
     this.accounts =
       this.accountConfigs.map(accountInfo => {
-        var account = new Account(accountInfo.username, accountInfo.password, this);
+        var account = new Account(accountInfo.username, accountInfo.password, this, {performance: application.performance});
         if(!this.defaultAccount) {
           this.defaultAccount = account;
         }
