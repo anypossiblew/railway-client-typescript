@@ -1,23 +1,22 @@
 accounts:
-  - username: xxxxxxxxxx
-    password: **********
-    orders:
-      - trainDates: 2018-03-10 2018-03-11 2018-03-12
-        backTrainDate: 2018-03-09
-        stationNames: 苏州 上海 杭州
-        trains: D955 G1969
-        pepoles: 张三 李四
-        seatTypes: 一等座 二等座
-  - username: yyyyyyyyyy
-    password: **********
-    orders:
-      - trainDates: 2018-03-10 2018-03-11 2018-03-12
-        backTrainDate: 2018-03-09
-        stationNames: 徐州 上海
-        trains: D955 G1969
-        pepoles: 张三
-        seatTypes: 二等座 一等座
-
+  # - username: xxxxxxxxx
+  #   password: *********
+  #   orders:
+  #     - trainDates: 2018-03-10 2018-03-11 2018-03-12
+  #       backTrainDate: 2018-03-09
+  #       stationNames: 苏州 上海 杭州
+  #       trains: D955 G1969
+  #       pepoles: 张三 李四
+  #       seatTypes: 二等座
+  # - username: yyyyyyyyyy
+  #   password: **********
+  #   orders:
+  #     - trainDates: 2018-03-10 2018-03-11 2018-03-12
+  #       backTrainDate: 2018-03-09
+  #       stationNames: 徐州 上海
+  #       trains: D955 G1969
+  #       pepoles: 张三
+  #       seatTypes: 二等座 一等座
 
 performance:
   query_interval: 100

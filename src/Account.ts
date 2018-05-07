@@ -178,7 +178,7 @@ export class Account {
 
   public cancelOrderQueue() {
     this.cancelQueueNoCompleteOrder()
-      .then(x=> {
+      .subscribe(x=> {
         if(x.status && x.data.existError == 'N') {
           console.log(chalk`{green.bold 排队订单已取消}`);
         }else {
@@ -359,8 +359,10 @@ export class Account {
             if(train[seatNum] == "有" || train[seatNum] > 0) {
               winston.debug(order.trainDate+"/"+train[3]+"/"+seat+"/"+train[seatNum]);
               if(order.planTrains.includes(train[3])) {
-                planTrains.push(train);
-                return true;
+                if(train[seatNum] == "有" || train[seatNum] > order.planPepoles.length) {
+                  planTrains.push(train);
+                  return true;
+                }
               }
             }
             return false;
@@ -388,6 +390,7 @@ export class Account {
           this.query = false;
           // process.stdout.write(chalk`{yellow 有可购买余票 ${planTrain.toString()}}`);
           order.trainSecretStr = order.availableTrains[0][0];
+          order.train = order.availableTrains[0];
           return order;
         }else {
           this.query = true;
@@ -403,7 +406,7 @@ export class Account {
 
       // Step 11 预提交订单，Post
       .switchMap((order: Order)=>{
-        console.log(chalk`预提交订单 {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} 日期 {yellow ${order.trainDate}}`);
+        console.log(chalk`预提交订单 {yellow ${order.train[3]}} {yellow ${order.fromStationName}} 到 {yellow ${order.toStationName}} 日期 {yellow ${order.trainDate}}`);
         return Observable.of(1)
           .mergeMap(()=>this.submitOrderRequest(order))
           .retryWhen(error$=>
@@ -1083,7 +1086,7 @@ export class Account {
 
     var param = querystring.stringify(query);
 
-    var url = "https://kyfw.12306.cn/otn/leftTicket/queryZ?"+param;
+    var url = "https://kyfw.12306.cn/otn/leftTicket/query?"+param;
 
     return this.request(url)
       .map(body=> {
@@ -1454,13 +1457,13 @@ export class Account {
       ,json: true
     };
 
-    return this.request(options)
-      .map(body=> {
-        if(this.isSystemBussy(body)) {
-          throw this.SYSTEM_BUSSY;
-        }
-        return body;
-      });
+    return this.request(options);
+      // .map(body=> {
+      //   if(this.isSystemBussy(body)) {
+      //     throw this.SYSTEM_BUSSY;
+      //   }
+      //   return body;
+      // });
   }
 
   private initNoComplete(): Observable<any> {

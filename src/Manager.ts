@@ -23,7 +23,11 @@ export class Manager {
   constructor(path: string) {
     try {
       var application = yaml.safeLoad(fs.readFileSync(path, 'utf8'));
-      console.info(JSON.stringify(application));
+      // console.info(JSON.stringify(application));
+      if(!application.accounts) {
+        winston.error('Please config your 12306 account in application.yml!');
+        return;
+      }
       this.accountConfigs = application.accounts;
     } catch (e) {
       winston.error(e);
@@ -37,14 +41,15 @@ export class Manager {
       });
     this.releaseCaptchaLock();
 
-    this.accounts =
+    this.accounts = this.accountConfigs ?
       this.accountConfigs.map(accountInfo => {
         var account = new Account(accountInfo.username, accountInfo.password, this, {performance: application.performance});
         if(!this.defaultAccount) {
           this.defaultAccount = account;
         }
-        accountInfo.orders.forEach(order => {
-          account.createOrder(order.trainDates.split(' ') //发车日期
+        accountInfo.orders && accountInfo.orders.forEach(order => {
+          let trainDate = typeof order.trainDates == 'object' ? [order.trainDates.toJSON().slice(0,10)] : order.trainDates.split(' ');
+          account.createOrder(trainDate //发车日期
                        ,order.backTrainDate.toJSON().slice(0,10) //返程日期
                        ,order.stationNames.split(' ') //出发,经过站,到达站
                        ,order.trains.split(' ') //车次
@@ -53,7 +58,7 @@ export class Manager {
                      );
         });
         return account;
-    });
+    }) : [];
   }
 
   public getCaptchaLock(): Observable<string> {
@@ -76,11 +81,15 @@ export class Manager {
       )
     )
     .subscribe(()=> {
-      this.accounts.forEach(account => {
-        winston.debug(`account ${account.userName} submit`);
-        const ls = spawn(process.argv[0], ['dist/index.js', '-a', account.userName], {shell: true, detached: true, encoding: "gbk"});
-        // account.submit();
-      });
+      if(this.accounts.length === 1) {
+        this.accounts[0].submit();
+      }else {
+        this.accounts.forEach(account => {
+          winston.debug(`account ${account.userName} submit`);
+          const ls = spawn(process.argv[0], ['dist/index.js', '-a', account.userName], {shell: true, detached: true, encoding: "gbk"});
+          // account.submit();
+        });
+      }
     },err=>console.log(err));
   }
 
