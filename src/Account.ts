@@ -1088,7 +1088,17 @@ export class Account {
 
     var url = "https://kyfw.12306.cn/otn/leftTicket/query?"+param;
 
-    return this.request(url)
+    var options = {
+      url: url
+      ,method: "GET"
+      ,headers: Object.assign(Object.assign({}, this.headers), {
+        "If-Modified-Since": "0"
+        ,"Cache-Control": "no-cache"
+        ,"Referer": "https://kyfw.12306.cn/otn/leftTicket/init"
+      })
+    };
+
+    return this.request(options)
       .map(body=> {
         if(!body) {
           throw "系统返回无数据";

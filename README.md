@@ -8,7 +8,7 @@ High speed railway client (TypeScript version)
 
 2. 查询余票信息：`node dist/index.js leftTickets 2018-03-01 上海 徐州` 车次信息将用在第三步中，
 
-3. 更改 **./dist/index.js** 文件中的账号和乘车信息并添加车次，乘车人信息需要事先在账号中维护。
+3. 更改 **./application.yml** 文件中的账号和乘车信息并添加车次，乘车人信息需要事先在账号中维护。
 
 4. 订票: `node dist/index.js`，首次登录需要输入验证码，验证码文件 `./captcha.BMP`，打开验证码文件，找到答案对应的位置依次输入到命令行窗口，用 "," 或者 " " 隔开，例如：1,6,7
 
@@ -59,6 +59,10 @@ High speed railway client (TypeScript version)
 ## Develop
 
 `npm install`
+
+`npm install gulp-cli -g`
+
+`gulp`
 
 `npm start` or `node dist/index.js`
 
