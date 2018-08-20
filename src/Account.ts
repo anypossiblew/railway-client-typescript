@@ -126,10 +126,15 @@ export class Account {
       // 检查未完成订单
       .mergeMap(()=> this.queryMyOrderNoComplete())
       .do(body=> {
+        winston.debug(JSON.stringify(body));
         if(body.data) {
           this.printMyOrderNoComplete(body);
           if(body.data.orderCacheDTO) {
-            throw '您还有排队订单';
+              if(body.data.orderCacheDTO.status === 3) {
+                winston.warn(body.data.orderCacheDTO.message.message);
+              }else {
+                throw '您还有排队订单';
+              }
           }else if(body.data.orderDBList){
             throw '您还有未完成订单';
           }
@@ -571,7 +576,7 @@ export class Account {
       .retryWhen(error$=>error$.do(err=>winston.error(chalk`{yellow.bold ${err}}`))
           .mergeMap((err)=> {
             if(err == 'retry') {
-              return Observable.timer(500);
+              return Observable.timer(1000);
             }else {
               return Observable.throw(err);
             }
@@ -677,7 +682,9 @@ export class Account {
             }else if(orderQueue.data.waitTime === -4){
               console.log("您的车票订单正在处理, 请稍等...");
             }else {
-              console.log(chalk`排队人数：{yellow.bold ${orderQueue.data.waitCount}} 预计等待时间：{yellow.bold ${parseInt(orderQueue.data.waitTime / 1.5)}} 分钟`);
+              let m = parseInt(orderQueue.data.waitTime / 60);
+              let s = orderQueue.data.waitTime % 60;
+              console.log(chalk`排队人数：{yellow.bold ${orderQueue.data.waitCount}} 预计等待时间：${m>0?m+' 分钟 ':''}${s} 秒`);
             }
           }else {
             console.log(orderQueue);
