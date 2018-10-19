@@ -1633,6 +1633,29 @@ export class Account {
     return this.request(options);
   }
 
+  private postQueryMyOrder(queryStartDate, queryEndDate, pageSize, pageIndex) {
+    let url = "https://kyfw.12306.cn/otn/queryOrder/queryMyOrder";
+    let options = {
+      url: url
+      ,method: "POST"
+      ,headers: Object.assign(Object.assign({}, this.headers), {
+        "Referer": "https://kyfw.12306.cn/otn/queryOrder/init"
+      })
+      ,form: {
+        "queryType": 2,
+        "queryStartDate": queryStartDate,
+        "queryEndDate": queryEndDate,
+        "come_from_flag": 'my_order',
+        "pageSize": pageSize,
+        "pageIndex": pageIndex,
+        "query_where": 'G',
+        "sequeue_train_name": ''
+      }
+    };
+
+    return this.request(options);
+  }
+
   public cancelNoCompleteOrder(sequenceNo: string, cancelId: string = 'cancel_order') {
     this.observableLoginInit()
       .mergeMap(()=>this.cancelNoCompleteMyOrder(sequenceNo, cancelId))
@@ -1646,5 +1669,34 @@ export class Account {
         }
       ,err=>winston.error(chalk`{red ${JSON.stringify(err)}}`)
       );
+  }
+
+  public queryMyOrder([queryStartDate, queryEndDate]) {
+    this.observableLoginInit()
+      .mergeMap(()=>this.postQueryMyOrder(queryStartDate, queryEndDate, 8, 0))
+      .map(body=> JSON.parse(body))
+      .subscribe((body)=>{
+
+        let tickets = [];
+        body.data.OrderDTODataList.forEach(order=> {
+          order.tickets.forEach(ticket=> {
+            tickets.push({
+              "车次信息": ticket.start_train_date_page+' 开\n'+ticket.stationTrainDTO.station_train_code
+                          +' '+ticket.stationTrainDTO.from_station_name+'-'
+                          +ticket.stationTrainDTO.to_station_name,
+              "席位信息": ticket.coach_no+'车厢\n'+ticket.seat_name+'\n'+ticket.seat_type_name,
+              "旅客信息": ticket.passengerDTO.passenger_name+'\n'+ticket.passengerDTO.passenger_id_type_name,
+              "票款金额": ticket.ticket_type_name+'\n'+ticket.str_ticket_price_page+'元',
+              "车票状态": ticket.ticket_status_name
+            });
+          });
+        });
+
+        var columns = columnify(tickets, {
+          columnSplitter: '|'
+        });
+     
+        console.log(columns);
+      });
   }
 }

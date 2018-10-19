@@ -56,6 +56,10 @@ High speed railway client (TypeScript version)
 
 ![IMG: checkMyOrderNoComplete](./resources/checkMyOrderNoComplete.png)
 
+### 查询未出行订单
+
+`node dist/index.js queryMyOrder 2018-08-22 2018-10-31`
+
 ## Develop
 
 `npm install`
@@ -71,6 +75,10 @@ High speed railway client (TypeScript version)
 gulp: `npm install gulp -g`
 
 ## Updates
+
+### V0.6
+1. 查询未出行订单
+
 ### V0.5
 1. 全面使用 [RxJS](https://github.com/Reactive-Extensions/RxJS) Observable 异步能力优化数据流程，做到最健壮 Robust 的抢票程序；
 2. 新增支持座位类型
